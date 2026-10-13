@@ -2,20 +2,18 @@
 
 # H2Link
 
-Online co-op for the Halo 2 Editing Kit's Tag Test (`halo2_tag_test.exe`): rooms on a lobby server, up to 16 players,
-everyone's game started and joined together, join in progress, split-screen windows on one PC.
+16 Player online co-op for the Halo 2 Editing Kit's Tag Test (`halo2_tag_test.exe`). Up to 4 players split-screen on each PC. Full Server/Room browser. Join in progress fully functional.
 
-**Players:** download `H2Link_Setup.exe` from the [latest release](../../releases/latest) and run it. It asks
-for the H2EK folder and makes H2Link's game files from the H2EK files already there: the game exes are made from
-`halo2_tag_test.exe` (which stays as it is), and the tags and `debug_menu_init.txt` H2Link changes are kept in `h2link_backup` first. Uninstalling
-puts the originals back. No H2EK files are part of this repository or its releases, only the differences.
-H2Link checks this page for new releases and offers to install them. Everyone in a room should run the same
-release.
+Download `H2Link_Setup.exe` from the [latest release](../../releases/latest) and run it. It asks
+for the H2EK folder and creates/patches H2Link's game files automatically if they are detected. 
+Uninstalling reverts all files to their original state. No H2EK files are part of this repository, 
+all files are backed up and patched in place.
 
-**Without the installer:** `H2Link.exe --install-game "<H2EK folder>"` makes the game files,
-`--check-game` only checks that the H2EK originals are there; `--restore-game` puts the originals back. An install changes all game files or, if an original is missing, none.
+H2Link checks for updates at launch. Everyone in a room should be running the same version.
 
-**Lobby server:** `H2Link.exe --server` from a Command Prompt (its output appears there), or `python src/h2link.py --server`; UDP 31100 open.
+**Lobby server:** I am hosting one myself, but you can run one yourself if you wish. 
+`H2Link.exe --server` from a Command Prompt (its output appears there), or `python src/h2link.py --server`;
+ensure UDP 31100 is open and that it is properly forwarded on your router.
 
 ## Repository
 

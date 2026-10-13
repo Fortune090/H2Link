@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.59"
+VERSION = "1.1.7"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -3869,7 +3869,9 @@ header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-be
 h1 img.logo{height:22px;width:auto;vertical-align:-2px;display:inline-block;filter:drop-shadow(0 0 9px rgba(110,180,255,.55))}
 h1{margin:0;font-size:30px;font-weight:700;font-stretch:75%;letter-spacing:.14em;text-transform:uppercase;color:#fff;
   text-shadow:0 0 18px rgba(110,180,255,.55)}
-h1 small{font-size:13px;font-weight:400;font-stretch:100%;letter-spacing:.04em;text-transform:none;color:var(--muted);margin-left:12px;text-shadow:none}
+h1{display:flex;align-items:center}
+h1 small{display:flex;flex-direction:column;justify-content:center;align-self:center;font-size:10.5px;line-height:1.25;
+  font-weight:400;font-stretch:100%;letter-spacing:.04em;text-transform:none;color:var(--muted);margin-left:12px;text-shadow:none}
 #status{font-size:14px;letter-spacing:.08em;text-transform:uppercase;color:var(--hi);padding:5px 12px;
   border:1px solid var(--line);background:var(--deep)}
 /* three columns of equal height; the lobby adds a chat across all three */
@@ -4276,7 +4278,8 @@ function tick(){return fetch('/api/state').then(r=>r.json()).then(s=>{S=s;
     $('f-profile').value=c.profile;
     $('f-server').value=c.server;$('f-room').value=c.room;$('d-direct').open=!c.server&&!c.builtin;
     if(c.builtin)$('f-server').placeholder='Built in. Paste another key to change it.';enterLabel();rooms();
-    $('ver').textContent='version '+s.version}
+    }
+  $('ver').innerHTML='<span>app v'+esc(s.version)+'</span><span>exe '+(s.exe_ver?'v'+s.exe_ver:'not found')+'</span>';
   rack();panel();log();chat()}).catch(()=>{$('status').textContent=closed?'H2Link is closed':'H2Link is not running';
     $('b-quit').hidden=true;document.body.classList.add('gone')})}
 $('b-host').onclick=()=>post('host',form());

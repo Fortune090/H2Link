@@ -3,13 +3,13 @@
   "file": "h2link_30tick.exe",
   "from": "halo2_tag_test.exe",
   "patch": "h2link_30tick.h2p",
-  "version": 116
+  "version": 117
  },
  {
   "file": "h2link_60tick.exe",
   "from": "halo2_tag_test.exe",
   "patch": "h2link_60tick.h2p",
-  "version": 116
+  "version": 117
  },
  {
   "file": "tags/ui/screens/game_shell/pregame_lobby/pregame_lobby.user_interface_screen_widget_definition",

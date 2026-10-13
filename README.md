@@ -10,6 +10,8 @@ Download `H2Link_Setup.exe` from the [latest release](../../releases/latest) and
 
 H2Link checks for updates at launch. Everyone in a room should be running the same version.
 
+To use cheats in game (if enabled by host), press Pause/Break on the keyboard or Back + D-Pad Up on the controller.
+
 **Lobby server:** I am hosting one myself, but you can run one yourself if you wish. `H2Link.exe --server` from a Command Prompt (its output appears there), or `python src/h2link.py --server`; ensure UDP 31100 is open and that it is properly forwarded on your router.
 
 ## Repository

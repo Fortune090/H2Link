@@ -1,8 +1,8 @@
-![H2L](assets/h2l_logo.png)
+![H2L](assets/h2link_logo.png)
 
 # H2Link
 
-16 Player online co-op for the Halo 2 Editing Kit's Tag Test (`halo2_tag_test.exe`). Up to 4 players split-screen on each PC. Full Server/Room browser. Join in progress fully functional.
+16 Player online co-op for the Halo 2 Editing Kit's Tag Test (`halo2_tag_test.exe`). Up to 4 players split-screen on each PC. Full Server/Room browser. Join in progress fully functional. H2EK's debug menu and cheats also working for all players. Have fun!
 
 Download `H2Link_Setup.exe` from the [latest release](../../releases/latest) and run it. It asks
 for the H2EK folder and creates/patches H2Link's game files automatically if they are detected. 

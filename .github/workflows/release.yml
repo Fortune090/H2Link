@@ -1,0 +1,51 @@
+# Builds and publishes a release when a version tag is pushed:  git tag v1.0.20 ; git push origin v1.0.20
+# The release gets H2Link_Setup.exe (installer), H2Link.exe (standalone launcher, also the lobby server with
+# --server) and manifest.json, which every H2Link reads to tell its player that an update is out.
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Versions
+        id: v
+        shell: pwsh
+        run: |
+          $v = '${{ github.ref_name }}'.TrimStart('v')
+          # the game exe version, from the patches (tools/make_patches.py writes them)
+          $items = Get-Content patches/patches.json -Raw | ConvertFrom-Json
+          $exe = $items | Where-Object { $_.file -match '^halo2_sysnet_auto16_v(\d+)_30tick\.exe$' } | Select-Object -First 1
+          $e = if ($exe) { [regex]::Match($exe.file, '_v(\d+)_').Groups[1].Value } else { '0' }
+          # this build's version and the repository its update check asks
+          $src = Get-Content src/h2link.py -Raw
+          $src = $src -replace 'VERSION = "[^"]*"', "VERSION = `"$v`"" -replace '__H2LINK_REPO__', '${{ github.repository }}'
+          Set-Content src/h2link.py $src -NoNewline
+          "{`"h2link`": `"$v`", `"exe`": $e, `"installer`": `"H2Link_Setup.exe`"}" | Set-Content manifest.json -NoNewline
+          "app=$v" >> $env:GITHUB_OUTPUT
+          "exe=$e" >> $env:GITHUB_OUTPUT
+      - name: Launcher (H2Link.exe)
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pyinstaller pywebview   # pywebview: H2Link.exe's own window (WebView2)
+          python -m PyInstaller --noconfirm --onefile --name H2Link --icon "$PWD/installer/h2link.ico" --add-data "$PWD/patches;patches" --distpath dist --workpath build/work --specpath build src/h2link.py
+      - name: Installer (H2Link_Setup.exe)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.v.outputs.app }}" installer/H2Link.iss
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: H2Link ${{ steps.v.outputs.app }} (game exe v${{ steps.v.outputs.exe }})
+          generate_release_notes: true
+          files: |
+            Output/H2Link_Setup.exe
+            dist/H2Link.exe
+            manifest.json

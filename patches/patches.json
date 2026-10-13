@@ -1,0 +1,32 @@
+[
+ {
+  "file": "halo2_sysnet_auto16_v79_30tick.exe",
+  "from": "halo2_tag_test.exe",
+  "patch": "halo2_sysnet_auto16_v79_30tick.h2p"
+ },
+ {
+  "file": "halo2_sysnet_auto16_v79_60tick.exe",
+  "from": "halo2_tag_test.exe",
+  "patch": "halo2_sysnet_auto16_v79_60tick.h2p"
+ },
+ {
+  "file": "tags/ui/screens/game_shell/pregame_lobby/pregame_lobby.user_interface_screen_widget_definition",
+  "from": "tags/ui/screens/game_shell/pregame_lobby/pregame_lobby.user_interface_screen_widget_definition",
+  "patch": "pregame_lobby.user_interface_screen_widget_definition.h2p"
+ },
+ {
+  "file": "tags/ui/ui_shared_globals.user_interface_shared_globals_definition",
+  "from": "tags/ui/ui_shared_globals.user_interface_shared_globals_definition",
+  "patch": "ui_shared_globals.user_interface_shared_globals_definition.h2p"
+ },
+ {
+  "file": "tags/ui/screens/game_shell/main_menu_screen/main_menu_screen.multilingual_unicode_string_list",
+  "from": "tags/ui/screens/game_shell/main_menu_screen/main_menu_screen.multilingual_unicode_string_list",
+  "patch": "main_menu_screen.multilingual_unicode_string_list.h2p"
+ },
+ {
+  "file": "debug_menu_init.txt",
+  "from": "debug_menu_init.txt",
+  "patch": "debug_menu_init.txt.h2p"
+ }
+]

@@ -50,6 +50,7 @@ Filename: "{app}\H2Link.exe"; WorkingDir: "{app}"; Description: "Start H2Link no
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\reports"
+Type: filesandordirs; Name: "{app}\page_window"
 Type: files; Name: "{app}\h2link.json"
 Type: files; Name: "{app}\gamedir.txt"
 Type: files; Name: "{app}\server_custom.flag"

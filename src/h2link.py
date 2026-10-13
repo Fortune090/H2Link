@@ -52,12 +52,13 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.51"
+VERSION = "1.0.54"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
 UPDATE_REPO = "__H2LINK_REPO__"
 UPDATE_EVERY = 6 * 3600.0
+ISSUES_URL = "https://github.com/Fortune090/H2Link/issues/new"     # where players report problems
 PROTO = 2
 IS_WIN = os.name == "nt"
 
@@ -440,17 +441,39 @@ def app_browser():
                 return p
     return None
 
+PAGE_WINDOW = [None]                    # the Edge/Chrome app window H2Link opened, to close it with H2Link
+
 def open_page(url):
-    """The control page in its own app window, else in the default browser."""
+    """The control page in its own app window, else in the default browser. The app window gets a browser
+    profile of its own (in H2Link's folder), so it is a separate browser process that H2Link can close when
+    it closes - Close H2Link then closes the window too."""
     exe = app_browser()
     if exe:
         try:
-            subprocess.Popen([exe, "--app=" + url, "--window-size=1280,1000", "--no-first-run",
-                              "--no-default-browser-check"], env=clean_env())
+            prof = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "page_window")
+            if PAGE_WINDOW[0] and PAGE_WINDOW[0].poll() is None:
+                close_page_window()
+            PAGE_WINDOW[0] = subprocess.Popen([exe, "--app=" + url, "--window-size=1280,1000", "--no-first-run",
+                                               "--no-default-browser-check", "--user-data-dir=" + prof],
+                                              env=clean_env())
             return
         except OSError:
             pass
     webbrowser.open(url)
+
+def close_page_window():
+    """Closes the app window open_page opened (nothing to do for a plain browser tab)."""
+    p, PAGE_WINDOW[0] = PAGE_WINDOW[0], None
+    if not p or p.poll() is not None:
+        return
+    try:
+        if IS_WIN:                               # the window's whole browser process tree
+            subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], env=clean_env(),
+                           capture_output=True, timeout=5, creationflags=0x08000000)
+        else:
+            p.terminate()
+    except Exception:
+        pass
 
 SHOW_WINDOW = [None]                    # set while H2Link.exe shows its own window: brings it to the front
 
@@ -2540,6 +2563,7 @@ class Engine(threading.Thread):
                 # Then H2Link ends at once: the room hears it is leaving, and nothing else is worth waiting for.
                 # The helper starts the installer the moment this process is gone.
                 self.command("quit")
+                close_page_window()
                 time.sleep(0.3)
                 self.log.flush(0.2)
                 os._exit(0)
@@ -2618,6 +2642,9 @@ class Engine(threading.Thread):
                 return
             self.log.warn("The game in slot %02d crashed - saving a report" % (slot + 1))
             self._cmd_report({"quiet": True})
+            if self.report and os.path.isfile(self.report):
+                self.cfg["crash_report"] = self.report           # offered on this page, and on the next start
+                self.save_cfg()
         except OSError:
             pass
 
@@ -2637,6 +2664,20 @@ class Engine(threading.Thread):
         elif any(it["state"] != "up to date" for it in items):
             rc = install_game(self.game_dir, say=lambda *_: None)
             self.log.info("Game files updated for this H2Link" if rc == 0 else "The game files could not be updated")
+
+    def _cmd_crash(self, d):
+        """The crash notice: "view" shows the saved report in Explorer, "issues" opens the GitHub issues page
+        in the browser, "dismiss" forgets it."""
+        path = self.cfg.get("crash_report") or ""
+        what = d.get("do")
+        if what == "view" and path and os.path.isfile(path):
+            if IS_WIN:
+                subprocess.Popen(["explorer", "/select,", path], env=clean_env())
+        elif what == "issues":
+            webbrowser.open(ISSUES_URL)
+        elif what == "dismiss":
+            self.cfg.pop("crash_report", None)
+            self.save_cfg()
 
     def _cmd_report(self, d):
         """One zip with everything needed to look into a problem."""
@@ -3378,6 +3419,8 @@ class Engine(threading.Thread):
             launch_wait=self.launch_wait, host_live=self.host_live,
             host_started=bool(self.host_lobby or self.host_live),
             update=self.update,
+            crash=(self.cfg.get("crash_report") if self.cfg.get("crash_report") and
+                   os.path.isfile(self.cfg["crash_report"]) else None),
             plan=dict(self.plan, known=self.plan_known or self.i_host_room(), text=plan_text(self.plan)),
             chat=[list(c) for c in self.chat],
             levels=[list(x) for x in LEVELS], difficulties=list(DIFFICULTIES), ticks=[list(x) for x in TICKS],
@@ -3940,6 +3983,12 @@ details{margin:2px 0 14px} summary{cursor:pointer;color:var(--hi);font-size:13px
 .rooms button span{font-weight:400;color:var(--muted);white-space:nowrap}
 .rooms button[aria-pressed=true]{background:linear-gradient(90deg,var(--sel1),var(--sel2));border-color:#fff;color:#fff}
 .rooms button[aria-pressed=true] span{color:#fff}
+/* the crash notice: like the update notice */
+#crash{margin:-20px 0 0;color:var(--ink);font-size:14px}
+#crash #t-crash{min-height:20px;line-height:20px;border-bottom:1px solid var(--line);padding-bottom:1px}
+#crash #t-crash a,#p-act .hint a{color:#9cd2ff}
+#crash .upd-row{display:flex;align-items:center;gap:18px;margin-top:20px} #crash #a-crashno{color:#9cd2ff;font-size:13px;text-decoration:none;letter-spacing:.04em}
+#upd:not([hidden])+#crash{margin-top:0}
 /* the update notice: one band under the header line, closed by a line of its own */
 /* the text sits in the page's usual 20 px gap under the header line, centred, closed by a second line; the
    button keeps its place and size under that line */
@@ -3961,6 +4010,9 @@ details{margin:2px 0 14px} summary{cursor:pointer;color:var(--hi);font-size:13px
 
 <div id="upd" hidden><div id="t-upd"></div>
   <div class="upd-row"><button id="b-upd">Install update</button><a id="a-upd" target="_blank" rel="noopener">What's new</a></div></div>
+<div id="crash" hidden><div id="t-crash">The game closed because of a crash. Would you like to report it? Open an issue at
+  <a href="#" id="a-issues">github.com/Fortune090/H2Link/issues/new</a> and attach the crash report.</div>
+  <div class="upd-row"><button id="b-crashview">View report</button><a href="#" id="a-crashno">Dismiss</a></div></div>
 <div class="cols" id="cols">
 <section class="panel" id="p-left">
   <div id="v-idle">
@@ -4043,7 +4095,7 @@ details{margin:2px 0 14px} summary{cursor:pointer;color:var(--hi);font-size:13px
 <section class="panel" id="p-act">
   <h2>Session activity</h2>
   <ul id="log" aria-live="polite"></ul>
-  <p class="hint" style="margin:12px 0 10px">A report is one zip with this list and the game's own logs for your slot, ready to send when something goes wrong.</p>
+  <p class="hint" style="margin:12px 0 10px">A report is one zip with this list and the game's own logs for your slot. When something goes wrong, open an issue at <a href="#" class="issues">github.com/Fortune090/H2Link/issues/new</a> and attach it.</p>
   <button class="quiet" id="b-report" style="align-self:flex-start">Save a report</button>
 </section>
 
@@ -4116,8 +4168,9 @@ function updateBanner(){
   const st=u.status||'';$('b-upd').disabled=st==='downloading'||st==='installing';
   $('b-upd').textContent=st==='downloading'?'Downloading...':st==='installing'?'Installing...':st==='failed'?'Try again':'Install update';
   if(st==='installing')$('t-upd').innerHTML='Installing <b>v'+esc(u.version)+'</b>. H2Link closes now and starts again in a moment.'}
+function crashNotice(){const c=S.crash;$('crash').hidden=!c}
 function panel(){
-  updateBanner();
+  updateBanner();crashNotice();
   player();
   const idle=S.mode==='idle',conn=S.state==='connecting';
   $('v-idle').hidden=!idle;$('v-conn').hidden=!conn;$('v-room').hidden=idle||conn;
@@ -4241,9 +4294,12 @@ $('f-skip').onchange=savePlayer;$('f-autostart').onchange=savePlayer;$('f-profil
 $('b-useprofile').onclick=()=>{$('f-profile').value=S.seen_profile;savePlayer()};
 let closed=false;
 $('b-upd').onclick=()=>post('update');
+$('b-crashview').onclick=()=>post('crash',{do:'view'});
+$('a-crashno').onclick=e=>{e.preventDefault();post('crash',{do:'dismiss'});$('crash').hidden=true};
+document.addEventListener('click',e=>{const a=e.target.closest('#a-issues,a.issues');if(!a)return;e.preventDefault();post('crash',{do:'issues'})});
 $('b-quit').onclick=()=>{const g=(S&&S.games||[]).length;
   if(g&&!confirm('A game is running through H2Link. Closing it cuts that game off from the others. Close anyway?'))return;
-  closed=true;post('quit')};
+  closed=true;post('quit');setTimeout(()=>{try{window.close()}catch(e){}},400)};
 let planHold=0;
 const sendPlan=()=>{planHold=Date.now()+1500;post('roomset',{level:$('f-level').value,difficulty:$('f-diff').value,tick:$('f-tick').value,
   cheats:$('f-cheats').checked,skulls:[...document.querySelectorAll('#skulls input:checked')].map(i=>i.dataset.skull)})};
@@ -4320,7 +4376,7 @@ def make_handler(engine, token):
                     except Exception:
                         pass
                 self._send(200, "application/json", json.dumps(dict(shown=bool(SHOW_WINDOW[0]))).encode())
-            elif cmd in ("host", "join", "leave", "launch", "settings", "report", "roomset", "chat", "update") and isinstance(body, dict):
+            elif cmd in ("host", "join", "leave", "launch", "settings", "report", "roomset", "chat", "update", "crash") and isinstance(body, dict):
                 engine.command(cmd, body)
                 time.sleep(0.15)
                 self._send(200, "application/json", b"{}")
@@ -4601,6 +4657,7 @@ def main():
         pass
     eng.command("quit")
     eng.join(3)
+    close_page_window()
     log.flush()
     if httpd:
         httpd.shutdown()

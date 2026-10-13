@@ -80,6 +80,34 @@ begin
   SetPreviousData(PreviousDataKey, 'GameDir', GamePage.Values[0]);
 end;
 
+function CheckGameFiles(Dir: String): Boolean;
+{ Before anything is installed: every H2EK original H2Link's game files are made from must be there.
+  If one is not, setup does not go on - nothing is changed in the game folder. }
+var
+  Code: Integer;
+  Log: String;
+  Text: AnsiString;
+begin
+  Result := False;
+  ExtractTemporaryFile('H2Link.exe');
+  Log := ExpandConstant('{tmp}\check.log');
+  if not Exec(ExpandConstant('{cmd}'), '/C ""' + ExpandConstant('{tmp}\H2Link.exe') + '" --check-game "' + Dir +
+              '" > "' + Log + '" 2>&1"', '', SW_HIDE, ewWaitUntilTerminated, Code) then begin
+    MsgBox('The game folder could not be checked.', mbError, MB_OK);
+    exit;
+  end;
+  if Code = 0 then begin
+    Result := True;
+    exit;
+  end;
+  if not LoadStringFromFile(Log, Text) then
+    Text := '';
+  MsgBox('H2Link cannot be installed into this H2EK folder yet: some of its files are not the H2EK''s ' +
+         'original files (changed earlier by hand or by an older H2Link copy).' + #13#10 + #13#10 +
+         'In Steam: Library > H2EK > Properties > Installed Files > Verify integrity of tool files. Then run ' +
+         'this installer again.' + #13#10 + #13#10 + Trim(String(Text)), mbError, MB_OK);
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
@@ -87,7 +115,8 @@ begin
     if not FileExists(AddBackslash(GamePage.Values[0]) + 'halo2_tag_test.exe') then begin
       MsgBox('This folder has no halo2_tag_test.exe, so it is not the H2EK folder.', mbError, MB_OK);
       Result := False;
-    end;
+    end else
+      Result := CheckGameFiles(GamePage.Values[0]);
   end;
 end;
 
@@ -113,9 +142,10 @@ begin
     WizardForm.StatusLabel.Caption := 'Making the game files from your H2EK files...';
     if not Exec(ExpandConstant('{cmd}'), '/C ""' + ExpandConstant('{app}\H2Link.exe') + '" --install-game "' +
                 GamePage.Values[0] + '" > "' + Log + '" 2>&1"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
-      MsgBox('Some game files could not be made - usually because a file in the H2EK folder is not the ' +
-             'original H2Link expects (a different H2EK version, or changed by something else).' + #13#10 + #13#10 +
-             'Details: ' + Log, mbError, MB_OK);
+      MsgBox('Some H2EK files were left as they are, because they are not the H2EK''s original files ' +
+             '(changed earlier by hand or by an older H2Link copy).' + #13#10 + #13#10 +
+             'To fix this: in Steam, Library > H2EK > Properties > Installed Files > Verify integrity of tool ' +
+             'files. Then run this installer again.' + #13#10 + #13#10 + 'Details: ' + Log, mbError, MB_OK);
   end;
 end;
 

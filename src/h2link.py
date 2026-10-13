@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.30"
+VERSION = "1.0.33"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -323,54 +323,65 @@ def _sha_file(path):
     with open(path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
 
-def install_game(game_dir, say=print):
-    """Makes or updates H2Link's game files in game_dir. Returns 0 when everything is in place."""
+def _game_plan(game_dir, say):
+    """For each game file: what install_game would do. Returns (items, problems): every item gets "state"
+    ("up to date" or "make", with "orig" and "patch" for the latter); problems lists the files that cannot
+    be made because the H2EK original is not there (not in place and not in h2link_backup)."""
     pdir = patches_dir()
+    with open(os.path.join(pdir, "patches.json")) as f:
+        items = json.load(f)
+    bdir = os.path.join(game_dir, "h2link_backup")
+    problems = []
+    for it in items:
+        dst = os.path.join(game_dir, it["file"])
+        with open(os.path.join(pdir, it["patch"]), "rb") as f:
+            it["patch_data"] = f.read()
+        h = patch_info(it["patch_data"])
+        if os.path.isfile(dst) and _sha_file(dst) == h["dst_sha256"]:
+            it["state"] = "up to date"
+            continue
+        for cand in (os.path.join(bdir, it["from"]), os.path.join(game_dir, it["from"])):
+            if os.path.isfile(cand) and _sha_file(cand) == h["src_sha256"]:
+                it["state"], it["orig"] = "make", cand
+                break
+        else:
+            it["state"] = "missing"
+            src = os.path.join(game_dir, it["from"])
+            problems.append("%s - %s" % (os.path.normpath(src),
+                            "not found" if not os.path.isfile(src) else
+                            "%d bytes, SHA-256 %s... (the original is %d bytes, %s...)" % (
+                                os.path.getsize(src), _sha_file(src)[:12], h["src_size"], h["src_sha256"][:12])))
+    return items, problems
+
+def install_game(game_dir, say=print, check_only=False):
+    """Makes or updates H2Link's game files in game_dir: all of them, or - when an H2EK original is missing -
+    none at all. Returns 0 when everything is (or, with check_only, can be) in place."""
     try:
-        with open(os.path.join(pdir, "patches.json")) as f:
-            items = json.load(f)
-    except (OSError, ValueError) as e:
-        say("No game-file patches with this H2Link (%s)" % e)
+        items, problems = _game_plan(game_dir, say)
+    except (OSError, ValueError, KeyError) as e:
+        say("Cannot read H2Link's game-file patches (%s)" % e)
         return 1
+    if problems:
+        for f in problems:
+            say("  NOT THE ORIGINAL  %s" % f)
+        say("Nothing was changed. Let Steam put the H2EK's original files back: Library > H2EK > Properties > "
+            "Installed Files > Verify integrity of tool files. Then install H2Link again.")
+        return 1
+    if check_only:
+        say("All H2EK files H2Link needs are in place.")
+        return 0
     bdir = os.path.join(game_dir, "h2link_backup")
     bad = 0
     for it in items:
+        if it["state"] == "up to date":
+            say("  up to date      %s" % it["file"])
+            continue
         dst = os.path.join(game_dir, it["file"])
-        src = os.path.join(game_dir, it["from"])
-        bak = os.path.join(bdir, it["from"])
         try:
-            if it.get("make") == "loading_dx11":
-                srcf = os.path.join(pdir, it["from"])          # shipped with H2Link (Project Cartographer's)
-                if os.path.isfile(dst) and hashlib.sha256(open(dst, "rb").read()).hexdigest().startswith(LOADING_SHA256):
-                    say("  up to date      %s" % it["file"])
-                    continue
-                with open(srcf, "rb") as f:
-                    out = loading_dx11(f.read())
-                bak = os.path.join(bdir, it["file"])
-                if os.path.isfile(dst) and not os.path.isfile(bak):     # someone's own loading screen: kept
-                    os.makedirs(bdir, exist_ok=True)
-                    shutil.copyfile(dst, bak)
-                with open(dst + ".h2link_new", "wb") as f:
-                    f.write(out)
-                os.replace(dst + ".h2link_new", dst)
-                say("  installed       %s" % it["file"])
-                continue
-            with open(os.path.join(pdir, it["patch"]), "rb") as f:
-                patch = f.read()
-            h = patch_info(patch)
-            if os.path.isfile(dst) and _sha_file(dst) == h["dst_sha256"]:
-                say("  up to date      %s" % it["file"])
-                continue
-            for cand in (bak, src):                     # the original: kept in the backup, or still in place
-                if os.path.isfile(cand) and _sha_file(cand) == h["src_sha256"]:
-                    with open(cand, "rb") as f:
-                        orig = f.read()
-                    break
-            else:
-                say("  NOT CHANGED     %s: %s is not the H2EK original this patch is for" % (it["file"], it["from"]))
-                bad += 1
-                continue
-            out = patch_apply(patch, orig)
+            with open(it["orig"], "rb") as f:
+                orig = f.read()
+            out = patch_apply(it["patch_data"], orig)
+            bak = os.path.join(bdir, it["from"])
             if it["file"] == it["from"] and not os.path.isfile(bak):
                 os.makedirs(os.path.dirname(bak), exist_ok=True)
                 with open(bak, "wb") as f:
@@ -380,8 +391,8 @@ def install_game(game_dir, say=print):
                 f.write(out)
             os.replace(dst + ".h2link_new", dst)
             say("  installed       %s" % it["file"])
-        except (OSError, ValueError, KeyError) as e:
-            say("  NOT CHANGED     %s: %s" % (it.get("file"), e))
+        except (OSError, ValueError) as e:
+            say("  NOT CHANGED     %s: %s" % (it["file"], e))
             bad += 1
     return 1 if bad else 0
 
@@ -4248,12 +4259,16 @@ def main():
     ap.add_argument("--no-direct", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--install-game", metavar="GAME_FOLDER",
                     help="make H2Link's game files in the H2EK folder from its own originals (backing them up), then exit")
+    ap.add_argument("--check-game", metavar="GAME_FOLDER",
+                    help="check that every H2EK original H2Link's game files are made from is there, then exit")
     ap.add_argument("--restore-game", metavar="GAME_FOLDER",
                     help="put the H2EK originals back and remove H2Link's game files, then exit")
     opts = ap.parse_args()
     if opts.install_game:
         print("H2Link %s: game files in %s" % (VERSION, opts.install_game))
         return install_game(opts.install_game)
+    if opts.check_game:
+        return install_game(opts.check_game, check_only=True)
     if opts.restore_game:
         print("H2Link %s: restoring %s" % (VERSION, opts.restore_game))
         return restore_game(opts.restore_game)

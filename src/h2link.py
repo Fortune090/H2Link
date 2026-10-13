@@ -3272,21 +3272,25 @@ class Engine(threading.Thread):
 
     # ---- timers ------------------------------------------------------------------
     def guest_name(self, name):
-        """True for names the game signs in with that are not a saved profile the player chose: the game's
-        Guest, H2Link 1.0.9's "Guest (n)", and the room names H2Link gives guest windows (1.0.10+)."""
+        """True for names the game signs in further windows with, not a saved profile the player chose: the
+        game's Guest, H2Link 1.0.9's "Guest (n)", and the room names H2Link gives windows 2-4 ("Name (1)"...).
+        The first window's plain H2Link name is not one of them: a player's profile may well carry that name."""
         n = name.strip().lower()
         if re.fullmatch(r"guest( \(\d+\))?", n):
             return True
         bases = [self.cfg.get("name", "")] + [p.name for p in self.peers.values()]
-        return any(n == window_name(b, k).lower() for b in bases if b for k in range(NSLOTS + 1))
+        return any(n == window_name(b, k).lower() for b in bases if b for k in range(1, NSLOTS + 1))
 
     def last_profile(self, t):
-        """The saved profile last signed in with in the game on this PC, from the newest networking logs,
-        passing over guest sign-ins (the room-name guests of further windows, Guest)."""
+        """The saved profile last signed in with in the game on this PC, from the newest networking logs.
+        Only first windows count: a log whose first sign-in is a further window's guest name belongs to
+        window 2-4, whatever that window signs in with later (the game can switch it to a default profile
+        such as "Halo0001"). Where the game's profile folder is readable, only names saved there count."""
         if t < self._prof_next:
             return self._prof
         self._prof_next = t + 20.0
         root, logs = self.game_dir, []
+        saved = saved_profiles()
         if root and os.path.isdir(root):
             try:
                 depth0 = root.rstrip("\\/").count(os.sep)
@@ -3301,7 +3305,10 @@ class Engine(threading.Thread):
                     with open(path, "rb") as f:
                         hits = re.findall(rb"lifecycle: UI-CONTROLLER-SIGNIN 0 ([^\r\n]{1,16})", f.read(1 << 20))
                     names = [h.decode("latin1").strip() for h in hits]
-                    names = [n for n in names if n and not self.guest_name(n)]
+                    names = [n for n in names if n]
+                    if not names or self.guest_name(names[0]):
+                        continue                        # a further window's log
+                    names = [n for n in names if not self.guest_name(n) and (saved is None or n.lower() in saved)]
                     if names:
                         self._prof = names[-1]
                         break

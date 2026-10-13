@@ -32,7 +32,9 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "dist\H2Link.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "installer\server.key"; DestDir: "{app}"; Flags: ignoreversion
+; The release's lobby server key - unless this install uses its own lobby server (server_custom.flag next to
+; H2Link.exe): then server.key was made from that address at install and updates never replace it.
+Source: "installer\server.key"; DestDir: "{app}"; Flags: ignoreversion; Check: UseReleaseKey
 ; Microsoft's WebView2 runtime, which draws H2Link's window: part of Windows 11, missing on some Windows 10 PCs.
 ; The build downloads Microsoft's small bootstrapper; it is only run when the runtime is not there.
 Source: "build\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
@@ -49,6 +51,8 @@ Filename: "{app}\H2Link.exe"; WorkingDir: "{app}"; Description: "Start H2Link no
 Type: filesandordirs; Name: "{app}\reports"
 Type: files; Name: "{app}\h2link.json"
 Type: files; Name: "{app}\gamedir.txt"
+Type: files; Name: "{app}\server_custom.flag"
+Type: files; Name: "{app}\server.key"
 Type: files; Name: "{app}\game_files.log"
 
 [Code]
@@ -67,6 +71,29 @@ end;
 
 var
   GamePage: TInputDirWizardPage;
+  ServerPage: TWizardPage;
+  OwnServer: TNewCheckBox;
+  ServerAddr: TNewEdit;
+
+function CustomFlag: String;
+begin
+  Result := ExpandConstant('{app}\server_custom.flag');
+end;
+
+{ The release's server.key is installed unless this install uses its own lobby server: chosen now, or chosen
+  in an earlier install (the flag file) - so a silent update never replaces a key made for this PC. }
+function UseReleaseKey: Boolean;
+begin
+  if WizardSilent then
+    Result := not FileExists(CustomFlag)
+  else
+    Result := not OwnServer.Checked;
+end;
+
+procedure OwnServerClick(Sender: TObject);
+begin
+  ServerAddr.Enabled := OwnServer.Checked;
+end;
 
 function SteamH2EK: String;
 var
@@ -90,11 +117,45 @@ begin
     'h2link_backup and put back when H2Link is uninstalled.', False, '');
   GamePage.Add('');
   GamePage.Values[0] := GetPreviousData('GameDir', SteamH2EK);
+
+  ServerPage := CreateCustomPage(GamePage.ID, 'Lobby server', 'Which lobby server should H2Link use?');
+  OwnServer := TNewCheckBox.Create(ServerPage);
+  OwnServer.Parent := ServerPage.Surface;
+  OwnServer.Width := ServerPage.SurfaceWidth;
+  OwnServer.Caption := 'Use my own lobby server (instead of the one this release comes with)';
+  OwnServer.OnClick := @OwnServerClick;
+  with TNewStaticText.Create(ServerPage) do begin
+    Parent := ServerPage.Surface;
+    Top := OwnServer.Top + OwnServer.Height + ScaleY(10);
+    Caption := 'IP address or host name, with :port only if it is not 31100:';
+  end;
+  ServerAddr := TNewEdit.Create(ServerPage);
+  ServerAddr.Parent := ServerPage.Surface;
+  ServerAddr.Top := OwnServer.Top + OwnServer.Height + ScaleY(30);
+  ServerAddr.Width := ScaleX(260);
+  ServerAddr.Text := GetPreviousData('ServerAddr', '');
+  OwnServer.Checked := (GetPreviousData('OwnServer', '0') = '1') or FileExists(ExpandConstant('{localappdata}\Programs\H2Link\server_custom.flag'));
+  ServerAddr.Enabled := OwnServer.Checked;
+  with TNewStaticText.Create(ServerPage) do begin
+    Parent := ServerPage.Surface;
+    Top := ServerAddr.Top + ServerAddr.Height + ScaleY(12);
+    Width := ServerPage.SurfaceWidth;
+    AutoSize := False;
+    Height := ScaleY(60);
+    WordWrap := True;
+    Caption := 'H2Link makes a server key from this address for this install. Updates keep it: they never replace ' +
+               'it with the release''s key. Run this installer again and untick the box to go back to the release''s server.';
+  end;
 end;
 
 procedure RegisterPreviousData(PreviousDataKey: Integer);
 begin
   SetPreviousData(PreviousDataKey, 'GameDir', GamePage.Values[0]);
+  if OwnServer.Checked then
+    SetPreviousData(PreviousDataKey, 'OwnServer', '1')
+  else
+    SetPreviousData(PreviousDataKey, 'OwnServer', '0');
+  SetPreviousData(PreviousDataKey, 'ServerAddr', ServerAddr.Text);
 end;
 
 function CheckGameFiles(Dir: String): Boolean;
@@ -135,6 +196,10 @@ begin
     end else
       Result := CheckGameFiles(GamePage.Values[0]);
   end;
+  if (CurPageID = ServerPage.ID) and OwnServer.Checked and (Trim(ServerAddr.Text) = '') then begin
+    MsgBox('Enter your lobby server''s IP address or host name, or untick the box.', mbError, MB_OK);
+    Result := False;
+  end;
 end;
 
 function JsonPath(S: String): String;
@@ -149,6 +214,17 @@ var
   Code: Integer;
   Cfg, Log: String;
 begin
+  if (CurStep = ssPostInstall) and not WizardSilent then begin
+    if OwnServer.Checked then begin
+      if Exec(ExpandConstant('{app}\H2Link.exe'), '--make-key "' + Trim(ServerAddr.Text) + '" --key-out "' +
+              ExpandConstant('{app}\server.key') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) then
+        SaveStringToFile(CustomFlag, Trim(ServerAddr.Text), False)
+      else
+        MsgBox('"' + Trim(ServerAddr.Text) + '" is not a usable lobby server address, so H2Link uses the release''s ' +
+               'server for now. Run this installer again to enter it.', mbError, MB_OK);
+    end else
+      DeleteFile(CustomFlag);
+  end;
   if CurStep = ssPostInstall then begin
     SaveStringToFile(ExpandConstant('{app}\gamedir.txt'), GamePage.Values[0], False);
     Cfg := ExpandConstant('{app}\h2link.json');
@@ -163,6 +239,9 @@ begin
              '(changed earlier by hand or by an older H2Link copy).' + #13#10 + #13#10 +
              'To fix this: in Steam, Library > H2EK > Properties > Installed Files > Verify integrity of tool ' +
              'files. Then run this installer again.' + #13#10 + #13#10 + 'Details: ' + Log, mbError, MB_OK);
+    { an update started from H2Link runs without any window: H2Link starts again once the game files are done }
+    if WizardSilent then
+      Exec(ExpandConstant('{app}\H2Link.exe'), '', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, Code);
   end;
 end;
 

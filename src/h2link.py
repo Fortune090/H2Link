@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.35"
+VERSION = "1.0.38"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -446,7 +446,7 @@ def open_page(url):
     if exe:
         try:
             subprocess.Popen([exe, "--app=" + url, "--window-size=1280,1000", "--no-first-run",
-                              "--no-default-browser-check"])
+                              "--no-default-browser-check"], env=clean_env())
             return
         except OSError:
             pass
@@ -464,6 +464,14 @@ def show_running(url):
         return bool(json.load(urllib.request.urlopen(req, timeout=2)).get("shown"))
     except Exception:
         return False
+
+def clean_env():
+    """This process's environment without PyInstaller's own variables, for starting other programs - above
+    all another H2Link.exe, which would otherwise try to use this one's temporary folder."""
+    env = {k: v for k, v in os.environ.items()
+           if not (k.startswith("_PYI") or k.startswith("_MEI") or k == "_MEIPASS2")}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
 
 def hide_console():
     """H2Link.exe as an app: its console window out of sight (the page has the activity list)."""
@@ -2328,7 +2336,7 @@ class Engine(threading.Thread):
             self.page.set_u32(EXPECT_OFF, n if ver >= 70 else 0)
         try:
             args = shlex.split(self.cfg.get("args", ""), posix=False)
-            proc = subprocess.Popen([exe] + args, cwd=self.game_dir)
+            proc = subprocess.Popen([exe] + args, cwd=self.game_dir, env=clean_env())
             if self.cfg.get("snap_windows", True):
                 # split screen: this window's place among this PC's windows
                 self.snapper.add(proc.pid, self._window_no, len(self.local_slots))
@@ -2496,27 +2504,52 @@ class Engine(threading.Thread):
             self._upd_busy = False
 
     def _cmd_update(self, d):
-        """Download the new release's installer, start it, and close H2Link so it can be replaced."""
+        """Download the new release's installer in the background, then close H2Link: the installer runs
+        without any window (it remembers the game folder) and starts H2Link again when it is done."""
         u = self.update
-        if not u or not u.get("installer"):
-            self.log.warn("No installer to download - open the release page instead")
+        if not u or not u.get("installer") or u.get("status") in ("downloading", "installing"):
             return
         if self.games:
-            self.log.warn("Close the game first: the installer replaces the game files too")
+            self.log.warn("Close the game first: the update replaces the game files too")
             return
+        u["status"] = "downloading"
         def run():
             try:
                 path = os.path.join(tempfile.gettempdir(), "H2Link_Setup_%s.exe" % re.sub(r"[^\w.]", "", u["version"]))
                 req = urllib.request.Request(u["installer"], headers={"User-Agent": "H2Link/" + VERSION})
-                with urllib.request.urlopen(req, timeout=60) as r, open(path, "wb") as f:
+                with urllib.request.urlopen(req, timeout=60) as r, open(path + ".part", "wb") as f:
                     shutil.copyfileobj(r, f)
-                self.log.info("Starting the installer for H2Link %s; H2Link closes now" % u["version"])
-                subprocess.Popen([path])
+                os.replace(path + ".part", path)
+                u["status"] = "installing"
+                self.log.info("Installing H2Link %s - H2Link closes now and starts again in a moment" % u["version"])
+                # No window and no questions (/VERYSILENT /SUPPRESSMSGBOXES); /CLOSEAPPLICATIONS waits for this
+                # H2Link to close. clean_env: see there ("Failed to load Python DLL").
+                subprocess.Popen([path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
+                                 env=clean_env())
+                time.sleep(1.0)                         # (lets the page show "installing")
                 self.command("quit")
             except Exception as e:
-                self.log.error("The update could not be downloaded (%s) - try the release page" % e)
-        self.log.info("Downloading H2Link %s..." % u["version"])
+                u["status"] = "failed"
+                self.log.error("The update could not be downloaded (%s) - try again, or use the release page" % e)
+        self.log.info("Downloading H2Link %s in the background..." % u["version"])
         threading.Thread(target=run, daemon=True).start()
+
+    def game_files_check(self):
+        """At start (H2Link.exe): are the game files the ones this H2Link carries? Says so in the activity list
+        when not - for example after an update whose game-file step could not run."""
+        if not getattr(sys, "frozen", False) or not self.game_dir:
+            return
+        try:
+            items, problems = _game_plan(self.game_dir, lambda *_: None)
+        except Exception:
+            return
+        if problems:
+            self.log.warn("The game files could not be updated: %s is not the H2EK's original. In Steam: Library > "
+                          "H2EK > Properties > Installed Files > Verify integrity of tool files, then install H2Link "
+                          "again." % ", ".join(os.path.basename(p.split(" - ")[0]) for p in problems))
+        elif any(it["state"] != "up to date" for it in items):
+            rc = install_game(self.game_dir, say=lambda *_: None)
+            self.log.info("Game files updated for this H2Link" if rc == 0 else "The game files could not be updated")
 
     def _cmd_report(self, d):
         """One zip with everything needed to look into a problem."""
@@ -2557,7 +2590,7 @@ class Engine(threading.Thread):
                 self.log.warn("No game logs found for slot %s in the game folder - the report only holds H2Link's side"
                               % slot_text(self.local_slots or [0]))
             if IS_WIN:
-                subprocess.Popen(["explorer", "/select,", path])
+                subprocess.Popen(["explorer", "/select,", path], env=clean_env())
         except Exception as e:
             self.log.error("Could not save the report (%s)" % e)
 
@@ -3978,7 +4011,10 @@ function updateBanner(){
   const u=S.update;$('upd').hidden=!u;if(!u)return;
   $('t-upd').textContent='An update is out: '+[u.newer_app?'H2Link '+u.version:'',u.newer_exe?'game exe v'+u.exe:''].filter(Boolean).join(' and ')+
     '. Everyone in a room should use the same version.';
-  $('a-upd').href=u.page;$('b-upd').hidden=!u.installer}
+  $('a-upd').href=u.page;$('b-upd').hidden=!u.installer;
+  const st=u.status||'';$('b-upd').disabled=st==='downloading'||st==='installing';
+  $('b-upd').textContent=st==='downloading'?'Downloading...':st==='installing'?'Installing...':st==='failed'?'Try again':'Install update';
+  if(st==='installing')$('t-upd').textContent='Installing H2Link '+u.version+'. H2Link closes now and starts again in a moment.'}
 function panel(){
   updateBanner();
   player();
@@ -4103,7 +4139,7 @@ $('f-snap').onchange=()=>post('settings',{snap_windows:$('f-snap').checked});
 $('f-skip').onchange=savePlayer;$('f-autostart').onchange=savePlayer;$('f-profile').onchange=savePlayer;$('f-profile').oninput=()=>{if(S)player()};
 $('b-useprofile').onclick=()=>{$('f-profile').value=S.seen_profile;savePlayer()};
 let closed=false;
-$('b-upd').onclick=()=>{if(confirm('Download and start the installer? H2Link closes while it runs.'))post('update')};
+$('b-upd').onclick=()=>post('update');
 $('b-quit').onclick=()=>{const g=(S&&S.games||[]).length;
   if(g&&!confirm('A game is running through H2Link. Closing it cuts that game off from the others. Close anyway?'))return;
   closed=true;post('quit')};
@@ -4241,6 +4277,8 @@ def main():
     ap.add_argument("--room", metavar="NAME", help="with --join: ADDRESS is a lobby server, enter this room on it")
     ap.add_argument("--make-key", metavar="ADDRESS",
                     help="print a server key for ADDRESS[:PORT]; put it in server.key so the address is not readable")
+    ap.add_argument("--key-out", metavar="FILE",
+                    help="with --make-key: write the key to FILE (as server.key) instead of only printing it")
     ap.add_argument("--relay-only", action="store_true",
                     help="with --server: never tell PCs each other's addresses; all traffic goes through the server")
     ap.add_argument("--server", action="store_true",
@@ -4288,6 +4326,13 @@ def main():
                   % (opts.make_key, DEFAULT_PORT))
             return 1
         print(key)
+        if opts.key_out:
+            try:
+                with open(opts.key_out, "w", encoding="utf-8") as f:
+                    f.write("# Lobby server chosen when H2Link was installed: %s, UDP port %d\n%s\n" % (host, port, key))
+            except OSError as e:
+                print("Could not write %s: %s" % (opts.key_out, e))
+                return 1
         print("\nThis key leads to %s, UDP port %d." % (host, port))
         try:
             ip = socket.gethostbyname(host)
@@ -4349,6 +4394,7 @@ def main():
     log = Log(echo=True)
     log.info("%s %s" % (APP, VERSION))
     eng = Engine(cfg, cfg_path, log, opts)
+    threading.Thread(target=eng.game_files_check, daemon=True).start()
     eng.save_cfg()
     if not eng.plat.atomic.ok:
         log.warn("Atomic page writes are not available on this Python build; using plain writes")

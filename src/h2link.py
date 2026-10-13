@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.55"
+VERSION = "1.0.56"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -3875,6 +3875,8 @@ h1 small{font-size:13px;font-weight:400;font-stretch:100%;letter-spacing:.04em;t
 #p-act{grid-area:act} .cols.inroom #p-act{height:max(204px,calc(100vh - 690px))}
 @media (min-width:1001px){.cols.inroom #p-left{contain:size;overflow-y:auto}}
 #room-player h3.sub{margin-top:0}
+#p-act .hint{font-size:12px;max-width:300px}   /* the report text: one size below the other hints, and the same
+                                                   300 px block on the main page as in a room */
 /* a tick box beside a menu: as tall as the menu and centred on it, its text centred */
 .row .check.beside{align-self:flex-end;height:var(--ctl,38px);margin:0 0 var(--ctl-mb,0px)!important;padding:0;justify-content:flex-start}
 .row .check.beside{gap:10px}
@@ -3894,10 +3896,10 @@ h1 small{font-size:13px;font-weight:400;font-stretch:100%;letter-spacing:.04em;t
 .cols.inroom #p-left .roominfo{margin-bottom:6px}
 .cols.inroom #log{height:auto;flex:1 1 0;min-height:0}
 /* in a room the activity box is low and wide: the report button sits beside the list, not under it */
-.cols.inroom #p-act{display:grid;grid-template-columns:minmax(0,1fr) 300px;grid-template-rows:auto auto 1fr;column-gap:24px;
-  grid-template-areas:"h h" "log hint" "log btn"}
+.cols.inroom #p-act{display:grid;grid-template-columns:minmax(0,1fr) 300px;grid-template-rows:auto 1fr auto auto 1fr;column-gap:24px;
+  grid-template-areas:"h h" "log ." "log hint" "log btn" "log ."}     /* text and button centred in the panel's body */
 .cols.inroom #p-act>h2{grid-area:h} .cols.inroom #p-act>#log{grid-area:log}
-.cols.inroom #p-act>p{grid-area:hint;margin:0 0 10px!important} .cols.inroom #p-act>button{grid-area:btn;align-self:start;justify-self:start}
+.cols.inroom #p-act>p{grid-area:hint;margin:3px 0 10px!important} .cols.inroom #p-act>button{grid-area:btn;align-self:start;justify-self:start}
 #chatlog{flex:1 1 0;min-height:0;overflow:auto;margin:0;padding:0;list-style:none;font-size:14.5px;line-height:1.5;
   scrollbar-color:var(--sel1) transparent}
 #chatlog li{padding:1px 0;overflow-wrap:anywhere} #chatlog b{color:var(--hi);font-weight:600;margin-right:6px}
@@ -4029,7 +4031,7 @@ details{margin:2px 0 14px} summary{cursor:pointer;color:var(--hi);font-size:13px
     </div>
     <div class="row" style="align-items:flex-end">
       <label>Players on this PC<select id="f-want"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
-      <label class="check beside" title="Without title bars. 1 window: full screen. 2: left and right. 3: one on top, two below (on 21:9 and wider: one left, two right). 4: the four corners."><input type="checkbox" id="f-snap"><span>Auto split screen</span></label>
+      <label class="check beside" title="Without title bars. 1 window: full screen. 2: left and right. 3: one on top, two below (on 21:9 and wider: one left, two right). 4: the four corners."><input type="checkbox" id="f-snap"><span>Auto full/split screen</span></label>
     </div>
     </div></div>
     <details style="margin-top:14px"><summary>Other H2Link settings</summary>

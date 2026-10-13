@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.33"
+VERSION = "1.0.35"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -2538,6 +2538,10 @@ class Engine(threading.Thread):
                                              else "internet", candidates=len(p.cands),
                                              sent=p.tx_pk, received=p.rx_pk) for p in self.peers.values()]
                 z.writestr("h2link_state.json", IP_RE.sub("x.x.x.x", json.dumps(snap, indent=1)))
+                wl = os.path.join(os.path.dirname(os.path.abspath(self.cfg_path)), "h2link_window.log")
+                if os.path.isfile(wl):
+                    with open(wl, "rb") as fh:
+                        z.writestr("h2link_window.log", fh.read())
                 if self.game_dir:
                     for slot in (self.local_slots or [0]):
                         for f in self._game_logs(slot):
@@ -4394,11 +4398,13 @@ def main():
     eng.page_seen = now()
     if gui is not None:
         try:
-            return run_window(gui, url, eng, log, httpd)
+            rc = run_window(gui, url, eng, log, httpd)
+            if rc is not None:
+                return rc
         except Exception as e:                       # no WebView2 on this PC: the app window instead
             log.warn("H2Link's own window could not open (%s) - using the browser" % e)
-            SHOW_WINDOW[0] = None
-            open_page(url)
+        SHOW_WINDOW[0] = None
+        open_page(url)                               # (also when the window stayed empty: see run_window)
     title = None
     try:
         while eng.is_alive():
@@ -4462,7 +4468,52 @@ def run_window(gui, url, eng, log, httpd):
         except Exception:
             pass
     threading.Thread(target=follow, daemon=True).start()
-    gui.start()                                      # until the window closes
+    # The page asks H2Link for its state every second. If the window has not asked within 12 s, its web view
+    # cannot show the page (an old or broken WebView2): the window closes and the page opens in Edge instead.
+    empty = [False]
+    seen0 = eng.page_seen
+    def watchdog():
+        time.sleep(12)
+        if eng.is_alive() and eng.page_seen <= seen0:
+            empty[0] = True
+            log.warn("H2Link's window stayed empty - opening its page in Edge instead")
+            try:
+                win.destroy()
+            except Exception:
+                pass
+    threading.Thread(target=watchdog, daemon=True).start()
+    # The window's own troubles go to h2link_window.log next to the settings (and into reports): which web
+    # engine it got, and anything pywebview reports.
+    wlog = os.path.join(os.path.dirname(os.path.abspath(eng.cfg_path)), "h2link_window.log")
+    try:
+        import logging
+        h = logging.FileHandler(wlog, mode="w", encoding="utf-8")
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        for name in ("pywebview", "webview"):
+            lg = logging.getLogger(name)
+            lg.addHandler(h)
+            lg.setLevel(logging.DEBUG)
+    except Exception:
+        pass
+    def started():
+        r = getattr(gui, "renderer", "?")
+        log.info("H2Link's window: web engine %s" % r)
+        try:
+            with open(wlog, "a", encoding="utf-8") as f:
+                f.write("H2Link %s, web engine: %s, page %s\n" % (VERSION, r, url))
+        except OSError:
+            pass
+        if r not in ("edgechromium", "?"):              # not WebView2: it cannot show the page
+            empty[0] = True
+            log.warn("H2Link's window got the %s engine, not WebView2 - opening its page in Edge instead" % r)
+            win.destroy()
+    try:
+        gui.start(started, gui="edgechromium")       # WebView2 only: never the old Internet Explorer engine
+    except TypeError:
+        gui.start()
+    if empty[0]:
+        return None                                  # main() goes on with the page in Edge
+    # until the window closes
     SHOW_WINDOW[0] = None
     eng.command("quit")
     eng.join(3)

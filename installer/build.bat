@@ -16,6 +16,7 @@ py -3 -m PyInstaller --noconfirm --onefile --name H2Link --icon "%CD%\installer\
 set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" (echo Inno Setup 6 not found - dist\H2Link.exe is built, the installer is not. & goto manifest)
+if not exist build\MicrosoftEdgeWebview2Setup.exe powershell -NoProfile -Command "Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile build\MicrosoftEdgeWebview2Setup.exe" || goto failed
 "%ISCC%" /DAppVer=%VER% installer\H2Link.iss || goto failed
 :manifest
 powershell -NoProfile -Command "$p = Get-Content patches\patches.json -Raw | ConvertFrom-Json; $e = ($p | Where-Object { $_.file -match '_v(\d+)_30tick' } | ForEach-Object { [regex]::Match($_.file, '_v(\d+)_').Groups[1].Value } | Select-Object -First 1); if (-not $e) { $e = 0 }; Set-Content manifest.json ('{\"h2link\": \"' + $env:VER + '\", \"exe\": ' + $e + ', \"installer\": \"H2Link_Setup.exe\"}') -NoNewline"

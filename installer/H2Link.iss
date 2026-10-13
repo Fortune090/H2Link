@@ -33,12 +33,16 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Files]
 Source: "dist\H2Link.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "installer\server.key"; DestDir: "{app}"; Flags: ignoreversion
+; Microsoft's WebView2 runtime, which draws H2Link's window: part of Windows 11, missing on some Windows 10 PCs.
+; The build downloads Microsoft's small bootstrapper; it is only run when the runtime is not there.
+Source: "build\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
 
 [Icons]
 Name: "{autoprograms}\H2Link"; Filename: "{app}\H2Link.exe"; WorkingDir: "{app}"
 Name: "{autodesktop}\H2Link"; Filename: "{app}\H2Link.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
+Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing Microsoft WebView2 (draws H2Link's window)..."; Flags: waituntilterminated; Check: NeedsWebView2
 Filename: "{app}\H2Link.exe"; WorkingDir: "{app}"; Description: "Start H2Link now"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
@@ -48,6 +52,19 @@ Type: files; Name: "{app}\gamedir.txt"
 Type: files; Name: "{app}\game_files.log"
 
 [Code]
+const
+  WV2 = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+
+function NeedsWebView2: Boolean;
+var
+  V: String;
+begin
+  { installed per machine (either registry view) or per user, with a real version }
+  Result := not ((RegQueryStringValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\' + WV2, 'pv', V) and (V <> '') and (V <> '0.0.0.0')) or
+                 (RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + WV2, 'pv', V) and (V <> '') and (V <> '0.0.0.0')) or
+                 (RegQueryStringValue(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\' + WV2, 'pv', V) and (V <> '') and (V <> '0.0.0.0')));
+end;
+
 var
   GamePage: TInputDirWizardPage;
 

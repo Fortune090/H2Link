@@ -1,6 +1,6 @@
 ![H2L](assets/h2link_logo.png)
 
-# CONNECTION QUALITY NOT GUARANTEED.  INITIAL PUBLIC RELEASE.
+# CONNECTION QUALITY NOT GUARANTEED.        INITIAL PUBLIC RELEASE.
 
 Up to 16-Player online co-op for the Halo 2 Editing Kit's Tag Test (`halo2_tag_test.exe`). Up to 4 players split-screen on each PC. Full Server/Room browser. Join in progress fully functional. H2EK's debug menu and cheats also working for all players. Have fun!
 

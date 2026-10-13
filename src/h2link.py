@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.38"
+VERSION = "1.0.42"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -2534,6 +2534,78 @@ class Engine(threading.Thread):
         self.log.info("Downloading H2Link %s in the background..." % u["version"])
         threading.Thread(target=run, daemon=True).start()
 
+    LOG_KEEP_DAYS = 7          # networking logs older than this go, except the newest few per slot
+    LOG_KEEP_NEWEST = 5
+    LOG_FULL_MAX = 20 << 20    # the cumulative debug_full log is cut back to its last LOG_FULL_KEEP beyond this
+    LOG_FULL_KEEP = 8 << 20
+
+    def clean_game_logs(self):
+        """At start: the game writes a networking log for every run and keeps adding to debug_full_sNN.txt, so
+        the H2EK's reports folder grows with every session. Networking logs older than a week go (the newest
+        few of each slot always stay); an oversized debug_full log keeps its last 8 MB - the recent sessions,
+        and with them any crash. Files a running game has open are left alone. Crashes are saved in a report
+        when they happen (see _game_closed), so nothing here can lose one."""
+        root = self.game_dir
+        if not root or not os.path.isdir(root):
+            return
+        net, gone, freed = {}, 0, 0
+        depth0 = root.rstrip("\\/").count(os.sep)
+        for d, dirs, files in os.walk(root):
+            if d.count(os.sep) - depth0 >= 2:
+                dirs[:] = []
+            for f in files:
+                low, p = f.lower(), os.path.join(d, f)
+                try:
+                    if low.startswith("networking_debug_") and low.endswith(".txt"):
+                        net.setdefault(low[-8:], []).append((os.path.getmtime(p), p))     # by "_sNN.txt"
+                    elif low.startswith("debug_full") and low.endswith(".txt") and os.path.getsize(p) > self.LOG_FULL_MAX:
+                        size = os.path.getsize(p)
+                        with open(p, "rb") as fh:
+                            fh.seek(size - self.LOG_FULL_KEEP)
+                            fh.readline()                          # start on a whole line
+                            tail = fh.read()
+                        with open(p + ".h2link_new", "wb") as fh:
+                            fh.write(tail)
+                        try:
+                            os.replace(p + ".h2link_new", p)       # fails while a game has it open: kept as is
+                            gone, freed = gone + 1, freed + size - len(tail)
+                        except OSError:
+                            os.remove(p + ".h2link_new")
+                except OSError:
+                    pass
+        cutoff = time.time() - self.LOG_KEEP_DAYS * 86400
+        for logs in net.values():
+            for mt, p in sorted(logs, reverse=True)[self.LOG_KEEP_NEWEST:]:
+                if mt < cutoff:
+                    try:
+                        n = os.path.getsize(p)
+                        os.remove(p)
+                        gone, freed = gone + 1, freed + n
+                    except OSError:
+                        pass
+        if gone:
+            self.log.info("Tidied %d old game log file%s (%.1f MB freed)" % (gone, "" if gone == 1 else "s", freed / 1e6))
+
+    CRASH_MARKS = (b"ASSERTION FAILED", b"### EXCEPTION", b"halt_and_catch_fire", b"crash_report")
+
+    def _game_closed(self, slot):
+        """A game window on this PC has closed. If its log ends in a crash, a report is saved right away -
+        the game's logs as they are now, before anything can tidy them."""
+        try:
+            f = [x for x in self._game_logs(slot) if os.path.basename(x).lower().startswith("debug_full")]
+            if not f:
+                return
+            with open(f[0], "rb") as fh:
+                fh.seek(max(0, os.path.getsize(f[0]) - 16384))
+                tail = fh.read()
+            start = getattr(self, "_slot_start", {}).get(slot, 0)
+            if os.path.getmtime(f[0]) < start or not any(m in tail for m in self.CRASH_MARKS):
+                return
+            self.log.warn("The game in slot %02d crashed - saving a report" % (slot + 1))
+            self._cmd_report({"quiet": True})
+        except OSError:
+            pass
+
     def game_files_check(self):
         """At start (H2Link.exe): are the game files the ones this H2Link carries? Says so in the activity list
         when not - for example after an update whose game-file step could not run."""
@@ -2571,10 +2643,6 @@ class Engine(threading.Thread):
                                              else "internet", candidates=len(p.cands),
                                              sent=p.tx_pk, received=p.rx_pk) for p in self.peers.values()]
                 z.writestr("h2link_state.json", IP_RE.sub("x.x.x.x", json.dumps(snap, indent=1)))
-                wl = os.path.join(os.path.dirname(os.path.abspath(self.cfg_path)), "h2link_window.log")
-                if os.path.isfile(wl):
-                    with open(wl, "rb") as fh:
-                        z.writestr("h2link_window.log", fh.read())
                 if self.game_dir:
                     for slot in (self.local_slots or [0]):
                         for f in self._game_logs(slot):
@@ -2589,7 +2657,9 @@ class Engine(threading.Thread):
             if n == 0:
                 self.log.warn("No game logs found for slot %s in the game folder - the report only holds H2Link's side"
                               % slot_text(self.local_slots or [0]))
-            if IS_WIN:
+            if d.get("quiet"):
+                self.log.info("Send this report along when you tell about the crash. It is in H2Link's reports folder.")
+            elif IS_WIN:
                 subprocess.Popen(["explorer", "/select,", path], env=clean_env())
         except Exception as e:
             self.log.error("Could not save the report (%s)" % e)
@@ -3172,6 +3242,14 @@ class Engine(threading.Thread):
         for s in self.local_slots:
             if self.plat.mutex_exists(s):
                 g |= 1 << s
+        if g != self.games:
+            if not hasattr(self, "_slot_start"):
+                self._slot_start = {}
+            for s in range(NSLOTS):
+                if g >> s & 1 and not self.games >> s & 1:
+                    self._slot_start[s] = time.time()
+                elif self.games >> s & 1 and not g >> s & 1:
+                    threading.Thread(target=self._game_closed, args=(s,), daemon=True).start()
         self.games = g
         self._tidy_poll(t)
         for p in list(self.peers.values()):
@@ -4269,7 +4347,20 @@ def load_cfg(path):
     return cfg
 
 
+def console_for_commands():
+    """H2Link.exe is built as a window program, so it never opens a console window. When it is started from a
+    Command Prompt (the lobby server, --make-key ...), its output goes to that Command Prompt instead."""
+    if not IS_WIN or sys.stdout is not None:
+        return
+    try:
+        if ctypes.windll.kernel32.AttachConsole(-1):        # ATTACH_PARENT_PROCESS
+            sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace", buffering=1)
+            sys.stderr = sys.stdout
+    except Exception:
+        pass
+
 def main():
+    console_for_commands()
     ap = argparse.ArgumentParser(description="%s %s - system link tunnel for the Halo 2 Tag Test sysnet builds" % (APP, VERSION))
     ap.add_argument("--config", help="settings file (default: h2link.json next to this script)")
     ap.add_argument("--host", action="store_true", help="open a room right away")
@@ -4303,17 +4394,30 @@ def main():
                     help="make H2Link's game files in the H2EK folder from its own originals (backing them up), then exit")
     ap.add_argument("--check-game", metavar="GAME_FOLDER",
                     help="check that every H2EK original H2Link's game files are made from is there, then exit")
+    ap.add_argument("--log", metavar="FILE",
+                    help="with --install-game, --check-game or --restore-game: also write what happens to FILE")
     ap.add_argument("--restore-game", metavar="GAME_FOLDER",
                     help="put the H2EK originals back and remove H2Link's game files, then exit")
     opts = ap.parse_args()
-    if opts.install_game:
-        print("H2Link %s: game files in %s" % (VERSION, opts.install_game))
-        return install_game(opts.install_game)
-    if opts.check_game:
-        return install_game(opts.check_game, check_only=True)
-    if opts.restore_game:
-        print("H2Link %s: restoring %s" % (VERSION, opts.restore_game))
-        return restore_game(opts.restore_game)
+    if opts.install_game or opts.check_game or opts.restore_game:
+        logf = None
+        if opts.log:
+            try:
+                logf = open(opts.log, "w", encoding="utf-8")
+            except OSError:
+                pass
+        def say(text):
+            print(text)
+            if logf:
+                logf.write(text + "\n")
+                logf.flush()
+        if opts.install_game:
+            say("H2Link %s: game files in %s" % (VERSION, opts.install_game))
+            return install_game(opts.install_game, say=say)
+        if opts.check_game:
+            return install_game(opts.check_game, say=say, check_only=True)
+        say("H2Link %s: restoring %s" % (VERSION, opts.restore_game))
+        return restore_game(opts.restore_game, say=say)
 
     if opts.make_key:
         try:
@@ -4395,6 +4499,7 @@ def main():
     log.info("%s %s" % (APP, VERSION))
     eng = Engine(cfg, cfg_path, log, opts)
     threading.Thread(target=eng.game_files_check, daemon=True).start()
+    threading.Thread(target=eng.clean_game_logs, daemon=True).start()
     eng.save_cfg()
     if not eng.plat.atomic.ok:
         log.warn("Atomic page writes are not available on this Python build; using plain writes")
@@ -4528,27 +4633,28 @@ def run_window(gui, url, eng, log, httpd):
             except Exception:
                 pass
     threading.Thread(target=watchdog, daemon=True).start()
-    # The window's own troubles go to h2link_window.log next to the settings (and into reports): which web
-    # engine it got, and anything pywebview reports.
-    wlog = os.path.join(os.path.dirname(os.path.abspath(eng.cfg_path)), "h2link_window.log")
+    # pywebview reports a missing or damaged WebView2 runtime only in its log: watch for it.
     try:
         import logging
-        h = logging.FileHandler(wlog, mode="w", encoding="utf-8")
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-        for name in ("pywebview", "webview"):
-            lg = logging.getLogger(name)
-            lg.addHandler(h)
-            lg.setLevel(logging.DEBUG)
+
+        class NoWebView2(logging.Handler):
+            """WebView2 could not start (missing or damaged runtime): the page goes to Edge at once."""
+            def emit(self, rec):
+                if empty[0] or "WebView2 initialization failed" not in rec.getMessage():
+                    return
+                empty[0] = True
+                log.warn("Microsoft's WebView2 runtime is missing or damaged on this PC, so H2Link's own window "
+                         "cannot show its page - opening it in Edge instead. To fix it: Settings > Apps > "
+                         "Microsoft Edge WebView2 Runtime > Modify > Repair (or install the WebView2 Runtime "
+                         "from Microsoft).")
+                threading.Thread(target=lambda: (time.sleep(0.2), win.destroy()), daemon=True).start()
+        lg = logging.getLogger("pywebview")
+        lg.addHandler(NoWebView2())
+        lg.setLevel(logging.ERROR)
     except Exception:
         pass
     def started():
         r = getattr(gui, "renderer", "?")
-        log.info("H2Link's window: web engine %s" % r)
-        try:
-            with open(wlog, "a", encoding="utf-8") as f:
-                f.write("H2Link %s, web engine: %s, page %s\n" % (VERSION, r, url))
-        except OSError:
-            pass
         if r not in ("edgechromium", "?"):              # not WebView2: it cannot show the page
             empty[0] = True
             log.warn("H2Link's window got the %s engine, not WebView2 - opening its page in Edge instead" % r)

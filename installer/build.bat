@@ -12,7 +12,7 @@ if not exist build mkdir build
 rem this build's version and update repository, stamped into a copy of the source
 powershell -NoProfile -Command "$s = Get-Content src\h2link.py -Raw; $s = $s -replace 'VERSION = \"[^\"]*\"', ('VERSION = \"' + $env:VER + '\"'); if ($env:REPO) { $s = $s -replace '__H2LINK_REPO__', $env:REPO }; Set-Content build\h2link.py $s -NoNewline -Encoding UTF8" || goto failed
 py -3 -m pip install --upgrade pyinstaller pywebview || goto failed
-py -3 -m PyInstaller --noconfirm --onefile --name H2Link --icon "%CD%\installer\h2link.ico" --add-data "%CD%\patches;patches" --distpath dist --workpath build\work --specpath build build\h2link.py || goto failed
+py -3 -m PyInstaller --noconfirm --onefile --windowed --name H2Link --icon "%CD%\installer\h2link.ico" --add-data "%CD%\patches;patches" --distpath dist --workpath build\work --specpath build build\h2link.py || goto failed
 set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" (echo Inno Setup 6 not found - dist\H2Link.exe is built, the installer is not. & goto manifest)

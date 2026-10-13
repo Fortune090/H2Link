@@ -59,14 +59,24 @@ Type: files; Name: "{app}\game_files.log"
 const
   WV2 = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
 
-function NeedsWebView2: Boolean;
+function WebView2At(Root: Integer; Key, Folder: String): Boolean;
+{ registered AND its files really there: a registry entry left behind by a removed or damaged runtime does
+  not count (H2Link's window then reports "Couldn't find a compatible Webview2 Runtime installation") }
 var
   V: String;
 begin
-  { installed per machine (either registry view) or per user, with a real version }
-  Result := not ((RegQueryStringValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\' + WV2, 'pv', V) and (V <> '') and (V <> '0.0.0.0')) or
-                 (RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + WV2, 'pv', V) and (V <> '') and (V <> '0.0.0.0')) or
-                 (RegQueryStringValue(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\' + WV2, 'pv', V) and (V <> '') and (V <> '0.0.0.0')));
+  Result := RegQueryStringValue(Root, Key, 'pv', V) and (V <> '') and (V <> '0.0.0.0') and
+            FileExists(AddBackslash(Folder) + V + '\msedgewebview2.exe');
+end;
+
+function NeedsWebView2: Boolean;
+begin
+  Result := not (WebView2At(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\' + WV2,
+                            ExpandConstant('{commonpf32}\Microsoft\EdgeWebView\Application')) or
+                 WebView2At(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + WV2,
+                            ExpandConstant('{commonpf32}\Microsoft\EdgeWebView\Application')) or
+                 WebView2At(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\' + WV2,
+                            ExpandConstant('{localappdata}\Microsoft\EdgeWebView\Application')));
 end;
 
 var
@@ -169,8 +179,8 @@ begin
   Result := False;
   ExtractTemporaryFile('H2Link.exe');
   Log := ExpandConstant('{tmp}\check.log');
-  if not Exec(ExpandConstant('{cmd}'), '/C ""' + ExpandConstant('{tmp}\H2Link.exe') + '" --check-game "' + Dir +
-              '" > "' + Log + '" 2>&1"', '', SW_HIDE, ewWaitUntilTerminated, Code) then begin
+  if not Exec(ExpandConstant('{tmp}\H2Link.exe'), '--check-game "' + Dir + '" --log "' + Log + '"', '',
+              SW_HIDE, ewWaitUntilTerminated, Code) then begin
     MsgBox('The game folder could not be checked.', mbError, MB_OK);
     exit;
   end;
@@ -233,8 +243,8 @@ begin
     { the game files, made from this player's own H2EK files }
     Log := ExpandConstant('{app}\game_files.log');
     WizardForm.StatusLabel.Caption := 'Making the game files from your H2EK files...';
-    if not Exec(ExpandConstant('{cmd}'), '/C ""' + ExpandConstant('{app}\H2Link.exe') + '" --install-game "' +
-                GamePage.Values[0] + '" > "' + Log + '" 2>&1"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    if not Exec(ExpandConstant('{app}\H2Link.exe'), '--install-game "' + GamePage.Values[0] + '" --log "' + Log + '"',
+                '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
       MsgBox('Some H2EK files were left as they are, because they are not the H2EK''s original files ' +
              '(changed earlier by hand or by an older H2Link copy).' + #13#10 + #13#10 +
              'To fix this: in Steam, Library > H2EK > Properties > Installed Files > Verify integrity of tool ' +

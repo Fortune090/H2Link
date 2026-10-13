@@ -15,7 +15,7 @@ release.
 **Without the installer:** `H2Link.exe --install-game "<H2EK folder>"` makes the game files,
 `--check-game` only checks that the H2EK originals are there; `--restore-game` puts the originals back. An install changes all game files or, if an original is missing, none.
 
-**Lobby server:** `H2Link.exe --server` (or `python src/h2link.py --server`), UDP 31100 open.
+**Lobby server:** `H2Link.exe --server` from a Command Prompt (its output appears there), or `python src/h2link.py --server`; UDP 31100 open.
 
 ## Repository
 

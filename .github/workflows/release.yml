@@ -1,6 +1,6 @@
 # Builds and publishes a release when a version tag is pushed:  git tag v1.0.20 ; git push origin v1.0.20
-# The release gets H2Link_Setup.exe (installer), H2Link.exe (standalone launcher, also the lobby server with
-# --server) and manifest.json, which every H2Link reads to tell its player that an update is out.
+# The release gets H2Link_Setup.exe (the installer, which carries H2Link.exe) and manifest.json, which every
+# H2Link reads to tell its player that an update is out.
 name: Release
 on:
   push:
@@ -46,9 +46,8 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.v.outputs.app }}" installer/H2Link.iss
       - uses: softprops/action-gh-release@v3
         with:
-          name: H2Link ${{ steps.v.outputs.app }} (game exe v${{ steps.v.outputs.exe }})
+          name: H2Link ${{ steps.v.outputs.app }}
           generate_release_notes: true
           files: |
             Output/H2Link_Setup.exe
-            dist/H2Link.exe
             manifest.json

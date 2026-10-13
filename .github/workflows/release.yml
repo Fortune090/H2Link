@@ -22,8 +22,8 @@ jobs:
           $v = '${{ github.ref_name }}'.TrimStart('v')
           # the game exe version, from the patches (tools/make_patches.py writes them)
           $items = Get-Content patches/patches.json -Raw | ConvertFrom-Json
-          $exe = $items | Where-Object { $_.file -match '^halo2_sysnet_auto16_v(\d+)_30tick\.exe$' } | Select-Object -First 1
-          $e = if ($exe) { [regex]::Match($exe.file, '_v(\d+)_').Groups[1].Value } else { '0' }
+          $exe = $items | Where-Object { $_.file -eq 'h2link_30tick.exe' } | Select-Object -First 1
+          $e = if ($exe -and $exe.version) { $exe.version } else { '0' }
           # this build's version and the repository its update check asks
           $src = Get-Content src/h2link.py -Raw
           $src = $src -replace 'VERSION = "[^"]*"', "VERSION = `"$v`"" -replace '__H2LINK_REPO__', '${{ github.repository }}'

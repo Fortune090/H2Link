@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.43"
+VERSION = "1.0.47"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -3929,6 +3929,13 @@ details{margin:2px 0 14px} summary{cursor:pointer;color:var(--hi);font-size:13px
 .rooms button span{font-weight:400;color:var(--muted);white-space:nowrap}
 .rooms button[aria-pressed=true]{background:linear-gradient(90deg,var(--sel1),var(--sel2));border-color:#fff;color:#fff}
 .rooms button[aria-pressed=true] span{color:#fff}
+/* the update notice: one band under the header line, closed by a line of its own */
+/* the text sits in the page's usual 20 px gap under the header line, centred, closed by a second line; the
+   button keeps its place and size under that line */
+#upd{margin:-20px 0 0;color:var(--ink);font-size:14px}       /* the page's 20 px gap follows below */
+#upd #t-upd{height:20px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  border-bottom:1px solid var(--line)} #upd #t-upd b{color:#fff;font-weight:700}
+#upd .upd-row{display:flex;align-items:center;gap:18px;margin-top:20px}   /* = the gap between the columns */
 .share{border-top:1px solid var(--line);margin:14px 0 4px;padding-top:12px;color:var(--muted);font-size:14px}
 .share output{flex:1;min-width:180px;font-size:21px;font-weight:600;font-stretch:85%;color:#fff;user-select:all}
 [hidden]{display:none!important}
@@ -3941,8 +3948,8 @@ details{margin:2px 0 14px} summary{cursor:pointer;color:var(--hi);font-size:13px
 <header><h1>H2Link<small id="ver"></small></h1><div class="row" style="flex:none;align-items:center;gap:10px">
   <div id="status" role="status">Starting</div><button class="ghost" id="b-quit" style="flex:none;padding:8px 14px">Close H2Link</button></div></header>
 
-<div id="upd" class="share" style="margin:0 0 14px" hidden><div id="t-upd"></div>
-  <div class="row"><button id="b-upd">Install update</button><a id="a-upd" class="quiet" target="_blank" rel="noopener" style="align-self:center">What's new</a></div></div>
+<div id="upd" hidden><div id="t-upd"></div>
+  <div class="upd-row"><button id="b-upd">Install update</button><a id="a-upd" target="_blank" rel="noopener">What's new</a></div></div>
 <div class="cols" id="cols">
 <section class="panel" id="p-left">
   <div id="v-idle">
@@ -4092,12 +4099,12 @@ function player(){
   if(offer)$('b-useprofile').textContent='Use "'+seen+'", last used in the game on this PC'}
 function updateBanner(){
   const u=S.update;$('upd').hidden=!u;if(!u)return;
-  $('t-upd').textContent='An update is out: '+[u.newer_app?'H2Link '+u.version:'',u.newer_exe?'game exe v'+u.exe:''].filter(Boolean).join(' and ')+
-    '. Everyone in a room should use the same version.';
+  $('t-upd').innerHTML='New version available: <b>'+esc(u.newer_app?'v'+u.version:'game exe v'+u.exe)+
+    '</b>. Everyone in a Room should be using the same version.';
   $('a-upd').href=u.page;$('b-upd').hidden=!u.installer;
   const st=u.status||'';$('b-upd').disabled=st==='downloading'||st==='installing';
   $('b-upd').textContent=st==='downloading'?'Downloading...':st==='installing'?'Installing...':st==='failed'?'Try again':'Install update';
-  if(st==='installing')$('t-upd').textContent='Installing H2Link '+u.version+'. H2Link closes now and starts again in a moment.'}
+  if(st==='installing')$('t-upd').innerHTML='Installing <b>v'+esc(u.version)+'</b>. H2Link closes now and starts again in a moment.'}
 function panel(){
   updateBanner();
   player();

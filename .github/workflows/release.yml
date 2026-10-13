@@ -39,6 +39,9 @@ jobs:
       - name: Installer (H2Link_Setup.exe)
         shell: pwsh
         run: |
+          # Microsoft's WebView2 bootstrapper, run by the installer only on PCs without the runtime
+          New-Item -ItemType Directory -Force build | Out-Null
+          Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile build/MicrosoftEdgeWebview2Setup.exe
           choco install innosetup -y --no-progress
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.v.outputs.app }}" installer/H2Link.iss
       - uses: softprops/action-gh-release@v3

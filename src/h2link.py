@@ -4272,7 +4272,10 @@ function log(){
     return `<li class="${l[2]==='warn'?'warn2':l[2]}"><time>${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}</time>${esc(l[3])}</li>`}).join(''));
   while(el.children.length>400)el.removeChild(el.firstChild);
   if(stick)el.scrollTop=el.scrollHeight}
+let fails=0;
 function tick(){return fetch('/api/state').then(r=>r.json()).then(s=>{S=s;
+  // a reply: H2Link is there (again) - undo the "not running" state a missed reply may have set
+  fails=0;if(document.body.classList.contains('gone')&&!closed){document.body.classList.remove('gone');$('b-quit').hidden=false}
   if(!filled){filled=true;const c=s.cfg;$('f-name').value=c.name;$('f-dir').value=c.game_dir;$('f-pw').value=c.password;
     $('f-port').value=c.port;$('f-want').value=c.want;$('f-exe').value=c.exe;$('f-args').value=c.args;$('f-addr').value=(c.address||'').replace(/:31100$/,'');$('f-skip').checked=c.skip_picker;$('f-autostart').checked=c.auto_start;$('f-snap').checked=c.snap_windows;
     $('f-profile').value=c.profile;
@@ -4280,7 +4283,10 @@ function tick(){return fetch('/api/state').then(r=>r.json()).then(s=>{S=s;
     if(c.builtin)$('f-server').placeholder='Built in. Paste another key to change it.';enterLabel();rooms();
     }
   $('ver').innerHTML='<span>app v'+esc(s.version)+'</span><span>exe '+(s.exe_ver?'v'+s.exe_ver:'not found')+'</span>';
-  rack();panel();log();chat()}).catch(()=>{$('status').textContent=closed?'H2Link is closed':'H2Link is not running';
+  rack();panel();log();chat()}).catch(()=>{
+    // only after three missed replies in a row (or once H2Link was closed): one slow reply at start-up is not "gone"
+    if(++fails<3&&!closed)return;
+    $('status').textContent=closed?'H2Link is closed':'H2Link is not running';
     $('b-quit').hidden=true;document.body.classList.add('gone')})}
 $('b-host').onclick=()=>post('host',form());
 $('b-enter').onclick=()=>post('join',Object.assign(form(),{via:'server'}));

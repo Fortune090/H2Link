@@ -1,8 +1,8 @@
 @echo off
 rem Local build of H2Link.exe and H2Link_Setup.exe - the same steps as .github\workflows\release.yml.
 rem   installer\build.bat <version> [<github owner/repository>]      e.g.  installer\build.bat 1.0.30 Fortune/h2link
-rem Needs Python 3 (python.org) and Inno Setup 6 (jrsoftware.org). Output: dist\H2Link.exe, Output\H2Link_Setup.exe,
-rem manifest.json (upload all three to a GitHub release named v<version> for the update check).
+rem Needs Python 3 (python.org) and Inno Setup 6 (jrsoftware.org). Output: Output\H2Link_Setup.exe and manifest.json
+rem (upload both to a GitHub release named v<version> for the update check; dist\H2Link.exe is only built for the installer).
 setlocal
 cd /d "%~dp0\.."
 if "%~1"=="" (echo usage: installer\build.bat ^<version^> [^<owner/repository^>] & exit /b 1)
@@ -21,7 +21,7 @@ if not exist build\MicrosoftEdgeWebview2Setup.exe powershell -NoProfile -Command
 :manifest
 powershell -NoProfile -Command "$p = Get-Content patches\patches.json -Raw | ConvertFrom-Json; $e = ($p | Where-Object { $_.file -match '_v(\d+)_30tick' } | ForEach-Object { [regex]::Match($_.file, '_v(\d+)_').Groups[1].Value } | Select-Object -First 1); if (-not $e) { $e = 0 }; Set-Content manifest.json ('{\"h2link\": \"' + $env:VER + '\", \"exe\": ' + $e + ', \"installer\": \"H2Link_Setup.exe\"}') -NoNewline"
 echo.
-echo Done: dist\H2Link.exe, Output\H2Link_Setup.exe, manifest.json
+echo Done: Output\H2Link_Setup.exe and manifest.json
 pause
 exit /b 0
 :failed

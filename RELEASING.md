@@ -15,8 +15,8 @@
        git tag v1.0.21
        git push origin v1.0.21
 
-GitHub Actions builds `H2Link.exe` (with the patches inside) and `H2Link_Setup.exe`, and publishes them with
-`manifest.json` as the release `H2Link 1.0.21 (game exe v<N>)`. Within six hours every running H2Link shows
+GitHub Actions builds `H2Link_Setup.exe` (with H2Link and its game-file patches inside) and publishes it with
+`manifest.json` as the release `H2Link <version>`. Within six hours every running H2Link shows
 "An update is out" with an Install update button. The installer makes the new game files from each player's
 own H2EK files (or from the originals kept in `h2link_backup`, for files an earlier release changed).
 

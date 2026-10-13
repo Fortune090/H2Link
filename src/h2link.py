@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.54"
+VERSION = "1.0.55"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -4095,7 +4095,7 @@ details{margin:2px 0 14px} summary{cursor:pointer;color:var(--hi);font-size:13px
 <section class="panel" id="p-act">
   <h2>Session activity</h2>
   <ul id="log" aria-live="polite"></ul>
-  <p class="hint" style="margin:12px 0 10px">A report is one zip with this list and the game's own logs for your slot. When something goes wrong, open an issue at <a href="#" class="issues">github.com/Fortune090/H2Link/issues/new</a> and attach it.</p>
+  <p class="hint" style="margin:12px 0 10px">Something go wrong? Click the button below to generate a report file. Open an issue at <a href="#" class="issues">github.com/Fortune090/H2Link/issues/new</a>, explain what happened, and attach it.</p>
   <button class="quiet" id="b-report" style="align-self:flex-start">Save a report</button>
 </section>
 

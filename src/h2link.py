@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.42"
+VERSION = "1.0.43"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -2528,6 +2528,11 @@ class Engine(threading.Thread):
                                  env=clean_env())
                 time.sleep(1.0)                         # (lets the page show "installing")
                 self.command("quit")
+                # The installer waits for this H2Link to be gone before it replaces it. If anything (its window,
+                # a hung connection) keeps it from closing within a few seconds, it ends itself.
+                time.sleep(8.0)
+                self.log.flush()
+                os._exit(0)
             except Exception as e:
                 u["status"] = "failed"
                 self.log.error("The update could not be downloaded (%s) - try again, or use the release page" % e)

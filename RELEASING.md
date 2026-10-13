@@ -16,7 +16,7 @@
        git push origin v1.0.21
 
 GitHub Actions builds `H2Link_Setup.exe` (with H2Link and its game-file patches inside) and publishes it with
-`manifest.json` as the release `H2Link <version>`. Within six hours every running H2Link shows
+`manifest.json` as the release `H2Link v<version>`. Within six hours every running H2Link shows
 "An update is out" with an Install update button. The installer makes the new game files from each player's
 own H2EK files (or from the originals kept in `h2link_backup`, for files an earlier release changed).
 
@@ -24,3 +24,9 @@ Local build without GitHub: `installer\build.bat 1.0.30 <owner>/<repository>` (n
 
 The update check asks `https://api.github.com/repos/<this repository>/releases/latest`, so the repository
 must be public for players' copies to see releases.
+
+A letter after the numbers is a follow-up release: `v1.1.7a` counts as newer than `v1.1.7` and older than `v1.1.8`
+(H2Link 1.1.7a and later read it that way; 1.1.7 and earlier ignore the letter, so they are not offered a letter release).
+
+Test build without publishing: Actions > Test build > Run workflow on any branch. It makes `H2Link.exe` and
+`H2Link_Setup.exe` as the run's artifact; no release, so no player's update check sees it.

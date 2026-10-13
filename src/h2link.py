@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.1.7"
+VERSION = "1.1.7a"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -524,6 +524,107 @@ def list_text(n):
 
 SAVE_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,48}$")
 MAX_SAVE = 32 << 20
+
+# ---- tag prefetch (test): read the next level's tag files before the game does -------------------
+# A cold map load is mostly the game waiting on the disk for thousands of loose tag files (Cairo Station:
+# 21 s cold, 5.5 s with the files already in Windows' cache). While the room sits in the lobby, H2Link
+# reads the planned level's tags once, at background I/O priority, so the game later finds them in memory.
+# Only reads; a miss just means a normal-speed load. Tags name the tags they use by path, so the list is
+# found by following those paths from the level's scenario and the globals.
+PREFETCH_MAX_FILES = 40000
+PREFETCH_MAX_BYTES = 8 << 30
+PREFETCH_MAX_SECONDS = 240
+_TAG_TEXT = re.compile(rb"[\x20-\x7e]{4,4096}")
+
+
+def level_scenario_dir(game_dir, level):
+    """tags\\scenarios\\solo\\<NNx>_<name> for a level number (105 -> 01b_...), or "" if it is not there."""
+    pre = "%02d%s_" % (level // 100, {1: "a", 5: "b"}.get(level % 100, "?"))
+    root = os.path.join(game_dir, "tags", "scenarios", "solo")
+    try:
+        for e in os.scandir(root):
+            if e.is_dir() and e.name.lower().startswith(pre):
+                return e.path
+    except OSError:
+        pass
+    return ""
+
+
+def prefetch_level(game_dir, level, stop=lambda: False, say=None):
+    """Reads the tag files the level's scenario (and the globals) lead to. Returns (files, bytes, seconds)."""
+    t0 = time.time()
+    if os.name == "nt":
+        try:                                    # THREAD_MODE_BACKGROUND_BEGIN: low CPU and I/O priority
+            ctypes.windll.kernel32.SetThreadPriority(ctypes.windll.kernel32.GetCurrentThread(), 0x00010000)
+        except Exception:
+            pass
+    tags = os.path.join(game_dir, "tags")
+    listings = {}
+
+    def stems(d):                               # d: path below tags, lower case, "\\"-separated
+        hit = listings.get(d)
+        if hit is None:
+            hit = {}
+            try:
+                for e in os.scandir(os.path.join(tags, d.replace("\\", os.sep))):
+                    if e.is_file():
+                        hit.setdefault(e.name.rsplit(".", 1)[0].lower(), []).append(e.path)
+            except OSError:
+                pass
+            listings[d] = hit
+        return hit
+
+    def files_for(ref):
+        d, _, base = ref.rpartition("\\")
+        return stems(d).get(base) if d and base else None
+
+    todo, seen, n, size = collections.deque(), set(), 0, 0
+    try:
+        tops = [e.name.lower() for e in os.scandir(tags) if e.is_dir()]
+    except OSError:
+        tops = []
+    starts = re.compile("|".join(re.escape(t) + r"\\" for t in sorted(tops, key=len, reverse=True)) or "(?!)")
+
+    def add(paths):
+        for path in paths:
+            k = path.lower()
+            if k not in seen:
+                seen.add(k)
+                todo.append(path)
+
+    sdir = level_scenario_dir(game_dir, level)
+    if sdir:
+        add(e.path for e in os.scandir(sdir) if e.is_file())
+    add(stems("globals").get("globals", []))
+    while todo and not stop():
+        if n >= PREFETCH_MAX_FILES or size >= PREFETCH_MAX_BYTES or time.time() - t0 > PREFETCH_MAX_SECONDS:
+            break
+        path = todo.popleft()
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
+            continue
+        n, size = n + 1, size + len(data)
+        for m in _TAG_TEXT.finditer(data):
+            run = m.group().decode("ascii").lower()
+            if "\\" not in run:
+                continue
+            end = len(run)                # a path starts with a top tags folder; paths can sit back to back
+            for st in starts.finditer(run):
+                i = st.start()
+                for j in range(min(end, i + 256), i + 2, -1):
+                    hit = files_for(run[i:j])
+                    if hit:
+                        add(hit)
+                        break
+    if os.name == "nt":
+        try:
+            ctypes.windll.kernel32.SetThreadPriority(ctypes.windll.kernel32.GetCurrentThread(), 0x00020000)
+        except Exception:
+            pass
+    return n, size, time.time() - t0
+
 
 # ---- starting the level from the page (needs exe v36 or newer) -------------
 # The exe reads init.txt at launch. Its built-in automation then opens or finds the system link
@@ -1706,6 +1807,8 @@ class Engine(threading.Thread):
         self.chat_seq = 0
         self.report = None
         self._exe_cache = {}
+        self._pf_level, self._pf_gen, self._pf_tail, self._pf_scan = None, 0, None, 0.0
+        self._pf_next = None                # (level, when): the next campaign level, read once this one settles
         self._clear_room()
 
     # ---- small helpers -------------------------------------------------------
@@ -2481,10 +2584,12 @@ class Engine(threading.Thread):
 
     @staticmethod
     def _vtuple(v):
-        try:
-            return tuple(int(x) for x in re.findall(r"\d+", str(v))[:4])
-        except ValueError:
+        """"1.1.7" -> (1, 1, 7); a letter after the numbers counts as one more step: "1.1.7a" -> (1, 1, 7, 1)."""
+        m = re.match(r"\D*(\d+(?:\.\d+)*)([a-z]?)", str(v).strip().lower())
+        if not m:
             return ()
+        nums = tuple(int(x) for x in m.group(1).split(".")[:4])
+        return nums + ((ord(m.group(2)) - 96,) if m.group(2) else ())
 
     def _local_exe_version(self):
         best = 0
@@ -3248,6 +3353,66 @@ class Engine(threading.Thread):
         # start-up wait must be over anyway
         return tail[2] and t - tail[3] >= (3.0 if tail[4] else 35.0)
 
+    def _prefetch_check(self, t):
+        """Read tags ahead of the game: in the lobby, the room's level; while a level is being played, the
+        next campaign level (as retail Halo 2 reads its next map during play), so continuing loads fast."""
+        if not self.game_dir:
+            return
+        slot = next((s for s in self.local_slots if self.games >> s & 1), None)
+        if slot is None:
+            self._pf_tail = self._pf_next = None
+            if self.plan_known or self.i_host_room():
+                self._prefetch_start(self.plan["level"], "the room's level")
+            return
+        if self._pf_next and t >= self._pf_next[1]:      # the level has settled in: read the next one now
+            self._prefetch_start(self._pf_next[0], "the next level")
+            self._pf_next = None
+        if t < self._pf_scan:
+            return
+        self._pf_scan = t + 3.0
+        tail = self._pf_tail
+        if tail is None or tail[2] != slot or t >= tail[3]:
+            try:
+                logs = [f for f in self._game_logs(slot) if os.path.basename(f).lower().startswith("networking_debug_")]
+            except OSError:
+                logs = []
+            if not logs:
+                return
+            if tail is None or tail[0] != logs[0]:
+                tail = self._pf_tail = [logs[0], 0, slot, 0.0]
+            tail[3] = t + 15.0                  # look for a newer log (a game restarted) now and then
+        try:
+            with open(tail[0], "rb") as f:
+                f.seek(tail[1])
+                chunk = f.read(4 << 20)
+        except OSError:
+            return
+        cut = chunk.rfind(b"\n")
+        if cut < 0:
+            return
+        tail[1] += cut + 1
+        for m in re.finditer(rb"lifecycle: MAP-LOADED scenarios\\solo\\(\d\d)([ab])_", chunk[:cut]):
+            level = int(m.group(1)) * 100 + (1 if m.group(2) == b"a" else 5)
+            order = [x[0] for x in LEVELS_ALL]
+            if level in order and order.index(level) + 1 < len(order):
+                self._pf_next = (order[order.index(level) + 1], t + 20.0)
+
+    def _prefetch_start(self, level, why):
+        if level == self._pf_level:
+            return
+        self._pf_level, self._pf_gen = level, self._pf_gen + 1
+        gen, d, log = self._pf_gen, self.game_dir, self.log
+
+        def work():
+            try:
+                n, size, secs = prefetch_level(d, level, stop=lambda: self._pf_gen != gen)
+                if self._pf_gen == gen:
+                    log.info("Tag prefetch (%s): %s - read %d files, %.0f MB in %.1f s" % (
+                        why, LEVEL_NAME.get(level, level), n, size / 1048576.0, secs))
+            except Exception as e:
+                log.warn("Tag prefetch failed: %s" % e)
+        threading.Thread(target=work, daemon=True).start()
+
     def _slow(self, t):
         if t >= self._upd_next and not self._upd_busy:
             self._upd_next = t + UPDATE_EVERY
@@ -3257,6 +3422,7 @@ class Engine(threading.Thread):
             self._hs_tick(t)
         if not self.in_room:
             return
+        self._prefetch_check(t)
         h = self.hosting()
         if h != self.hosting_sent:
             self.hosting_sent = h
@@ -4496,7 +4662,14 @@ def main():
                     help="with --install-game, --check-game or --restore-game: also write what happens to FILE")
     ap.add_argument("--restore-game", metavar="GAME_FOLDER",
                     help="put the H2EK originals back and remove H2Link's game files, then exit")
+    ap.add_argument("--prefetch-test", nargs=2, metavar=("GAME_FOLDER", "LEVEL"),
+                    help="read the tags a level needs, as H2Link does in the lobby, and say how long it took")
     opts = ap.parse_args()
+    if opts.prefetch_test:
+        n, size, secs = prefetch_level(opts.prefetch_test[0], int(opts.prefetch_test[1]))
+        print("%s: %d files, %.0f MB in %.1f s" % (LEVEL_NAME.get(int(opts.prefetch_test[1]), opts.prefetch_test[1]),
+                                                   n, size / 1048576.0, secs))
+        return 0
     if opts.install_game or opts.check_game or opts.restore_game:
         logf = None
         if opts.log:

@@ -11,8 +11,8 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Versions
@@ -41,7 +41,7 @@ jobs:
         run: |
           choco install innosetup -y --no-progress
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.v.outputs.app }}" installer/H2Link.iss
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           name: H2Link ${{ steps.v.outputs.app }} (game exe v${{ steps.v.outputs.exe }})
           generate_release_notes: true

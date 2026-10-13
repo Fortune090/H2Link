@@ -1,13 +1,15 @@
 [
  {
-  "file": "halo2_sysnet_auto16_v79_30tick.exe",
+  "file": "h2link_30tick.exe",
   "from": "halo2_tag_test.exe",
-  "patch": "halo2_sysnet_auto16_v79_30tick.h2p"
+  "patch": "h2link_30tick.h2p",
+  "version": 116
  },
  {
-  "file": "halo2_sysnet_auto16_v79_60tick.exe",
+  "file": "h2link_60tick.exe",
   "from": "halo2_tag_test.exe",
-  "patch": "halo2_sysnet_auto16_v79_60tick.h2p"
+  "patch": "h2link_60tick.h2p",
+  "version": 116
  },
  {
   "file": "tags/ui/screens/game_shell/pregame_lobby/pregame_lobby.user_interface_screen_widget_definition",
@@ -20,9 +22,54 @@
   "patch": "ui_shared_globals.user_interface_shared_globals_definition.h2p"
  },
  {
+  "file": "tags/ui/player_skins/player_skin_lobby.user_interface_list_skin_definition",
+  "from": "tags/ui/player_skins/player_skin_lobby.user_interface_list_skin_definition",
+  "patch": "player_skin_lobby.user_interface_list_skin_definition.h2p"
+ },
+ {
+  "file": "tags/ui/screens/singleplayer/dialog_pause/dialog_pause.user_interface_screen_widget_definition",
+  "from": "tags/ui/screens/singleplayer/dialog_pause/dialog_pause.user_interface_screen_widget_definition",
+  "patch": "dialog_pause.user_interface_screen_widget_definition.h2p"
+ },
+ {
+  "file": "tags/ui/screens/game_shell/settings_screen/player_profile/choose_primary_color.user_interface_screen_widget_definition",
+  "from": "tags/ui/screens/game_shell/settings_screen/player_profile/choose_primary_color.user_interface_screen_widget_definition",
+  "patch": "choose_primary_color.user_interface_screen_widget_definition.h2p"
+ },
+ {
+  "file": "tags/ui/screens/game_shell/settings_screen/player_profile/choose_player_model.user_interface_screen_widget_definition",
+  "from": "tags/ui/screens/game_shell/settings_screen/player_profile/choose_player_model.user_interface_screen_widget_definition",
+  "patch": "choose_player_model.user_interface_screen_widget_definition.h2p"
+ },
+ {
+  "file": "tags/ui/screens/game_shell/pregame_lobby/squad_settings.multilingual_unicode_string_list",
+  "from": "tags/ui/screens/game_shell/pregame_lobby/squad_settings.multilingual_unicode_string_list",
+  "patch": "squad_settings.multilingual_unicode_string_list.h2p"
+ },
+ {
+  "file": "tags/ui/screens/game_shell/mp_game_select/mp_games.bitmap",
+  "from": "tags/ui/screens/game_shell/mp_game_select/mp_games.bitmap",
+  "patch": "mp_games.bitmap.h2p"
+ },
+ {
+  "file": "tags/ui/screens/game_shell/dialog_profile_select/dialog_profile.user_interface_screen_widget_definition",
+  "from": "tags/ui/screens/game_shell/dialog_profile_select/dialog_profile.user_interface_screen_widget_definition",
+  "patch": "dialog_profile.user_interface_screen_widget_definition.h2p"
+ },
+ {
   "file": "tags/ui/screens/game_shell/main_menu_screen/main_menu_screen.multilingual_unicode_string_list",
   "from": "tags/ui/screens/game_shell/main_menu_screen/main_menu_screen.multilingual_unicode_string_list",
   "patch": "main_menu_screen.multilingual_unicode_string_list.h2p"
+ },
+ {
+  "file": "tags/ui/screens/game_shell/online_y_menu/online_y_menu.user_interface_screen_widget_definition",
+  "from": "tags/ui/screens/game_shell/online_y_menu/online_y_menu.user_interface_screen_widget_definition",
+  "patch": "online_y_menu.user_interface_screen_widget_definition.h2p"
+ },
+ {
+  "file": "tags/globals/globals.globals",
+  "from": "tags/globals/globals.globals",
+  "patch": "globals.globals.h2p"
  },
  {
   "file": "debug_menu_init.txt",

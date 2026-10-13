@@ -7,7 +7,7 @@
 
          python tools/make_patches.py <untouched H2EK folder> <folder with the patched files>
 
-     The patched folder holds `halo2_sysnet_auto16_v<N>_30tick.exe`, `_60tick.exe` and the changed tags at their
+     The patched folder holds `h2link_30tick.exe`, `h2link_60tick.exe` (fixed names; the build number is the exe's own `JIPv<N>` tag) and the changed tags at their
      `tags\...` paths. This rewrites `patches/`: only differences, never the H2EK files.
 2. Commit and push.
 3. Tag and push the tag:

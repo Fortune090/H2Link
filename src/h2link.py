@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.56"
+VERSION = "1.0.59"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -179,8 +179,13 @@ class Snapper:
             self.u32.GetClientRect(h, ctypes.byref(cr))
             cw, ch = cr.r - cr.l, cr.b - cr.t
             if cw > 0 and ch > 0:
-                # WM_SIZE even when the size did not change: the game then matches its picture to the window
-                self.u32.PostMessageW(h, 0x0005, kind, (ch & 0xFFFF) << 16 | (cw & 0xFFFF))
+                # The same messages a window gets when a player resizes it by hand: start of a size move, the new
+                # size (WM_SIZE, sent even when the size did not change), end of the size move. The game matches
+                # its picture to the window on WM_SIZE, and its text sizes (small fonts below 950 high) on the
+                # end of the move, as it does after a manual resize.
+                self.u32.PostMessageW(h, 0x0231, 0, 0)                                    # WM_ENTERSIZEMOVE
+                self.u32.PostMessageW(h, 0x0005, kind, (ch & 0xFFFF) << 16 | (cw & 0xFFFF))  # WM_SIZE
+                self.u32.PostMessageW(h, 0x0232, 0, 0)                                    # WM_EXITSIZEMOVE
             j["done"] += 1
 
 GO_SPACING = 12.0                       # at most this many seconds between a PC's windows started by the room
@@ -2264,7 +2269,9 @@ class Engine(threading.Thread):
         if name:
             p = name if os.path.isabs(name) else os.path.join(d, name)
             return p if os.path.isfile(p) else None
-        found = glob.glob(os.path.join(d, "halo2_sysnet_auto16*.exe"))
+        # h2link_30tick.exe / h2link_60tick.exe (fixed names, so Windows' firewall rule stays valid across updates;
+        # the build number is inside the exe), and the older halo2_sysnet_auto16_v<N>_<T>tick.exe names
+        found = glob.glob(os.path.join(d, "h2link_*tick.exe")) + glob.glob(os.path.join(d, "halo2_sysnet_auto16*.exe"))
         if tick:
             found = [f for f in found if self._exe_info(f)[1] == tick]
         if found:
@@ -2312,7 +2319,7 @@ class Engine(threading.Thread):
         if not exe:
             if self._find_exe():
                 self.log.error("The room plays at %s, but the game folder has no %d-tick exe. Put "
-                               "halo2_sysnet_auto16_v%d_%dtick.exe (or newer) in it." % (TICK_NAME[tick], tick, AUTO_EXE, tick))
+                               "h2link_%dtick.exe in it (install H2Link again to get it)." % (TICK_NAME[tick], tick, tick))
             else:
                 self.log.error("No game exe found. Set the game folder (and the exe name if it is unusual).")
             return
@@ -3875,6 +3882,7 @@ h1 small{font-size:13px;font-weight:400;font-stretch:100%;letter-spacing:.04em;t
 #p-act{grid-area:act} .cols.inroom #p-act{height:max(204px,calc(100vh - 690px))}
 @media (min-width:1001px){.cols.inroom #p-left{contain:size;overflow-y:auto}}
 #room-player h3.sub{margin-top:0}
+#room-player #row-want{display:none}     /* players on this PC: set before joining a room, not inside one */
 #p-act .hint{font-size:12px;max-width:300px}   /* the report text: one size below the other hints, and the same
                                                    300 px block on the main page as in a room */
 /* a tick box beside a menu: as tall as the menu and centred on it, its text centred */
@@ -4029,7 +4037,7 @@ details{margin:2px 0 14px} summary{cursor:pointer;color:var(--hi);font-size:13px
       <p class="hint" id="t-profile"></p>
       <button class="quiet" id="b-useprofile" style="text-transform:none;letter-spacing:.02em;margin-bottom:6px" hidden></button>
     </div>
-    <div class="row" style="align-items:flex-end">
+    <div class="row" id="row-want" style="align-items:flex-end">
       <label>Players on this PC<select id="f-want"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
       <label class="check beside" title="Without title bars. 1 window: full screen. 2: left and right. 3: one on top, two below (on 21:9 and wider: one left, two right). 4: the four corners."><input type="checkbox" id="f-snap"><span>Auto full/split screen</span></label>
     </div>

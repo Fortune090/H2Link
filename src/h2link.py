@@ -52,7 +52,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.0.49"
+VERSION = "1.0.51"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -2522,16 +2522,26 @@ class Engine(threading.Thread):
                 os.replace(path + ".part", path)
                 u["status"] = "installing"
                 self.log.info("Installing H2Link %s - H2Link closes now and starts again in a moment" % u["version"])
-                # No window and no questions (/VERYSILENT /SUPPRESSMSGBOXES); /CLOSEAPPLICATIONS waits for this
-                # H2Link to close. clean_env: see there ("Failed to load Python DLL").
-                subprocess.Popen([path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
-                                 env=clean_env())
-                time.sleep(1.0)                         # (lets the page show "installing")
+                # The installer must only start once this H2Link is completely gone: a silent installer that
+                # finds H2Link.exe still in use gives up. So a hidden PowerShell waits for this process (and,
+                # for H2Link.exe, the small launcher process that unpacked it) to end, then starts the
+                # installer: no window and no questions (/VERYSILENT /SUPPRESSMSGBOXES). clean_env: see there.
+                args = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"]
+                if IS_WIN:
+                    pids = [os.getpid()] + ([os.getppid()] if getattr(sys, "frozen", False) else [])
+                    ps = ("Wait-Process -Id %s -Timeout 60 -ErrorAction SilentlyContinue; "
+                          "Start-Process -FilePath '%s' -ArgumentList %s"
+                          % (",".join(str(x) for x in pids), path.replace("'", "''"),
+                             ",".join("'%s'" % a for a in args)))
+                    subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+                                      "-Command", ps], env=clean_env(), creationflags=0x08000000)
+                else:
+                    subprocess.Popen([path] + args, env=clean_env())
+                # Then H2Link ends at once: the room hears it is leaving, and nothing else is worth waiting for.
+                # The helper starts the installer the moment this process is gone.
                 self.command("quit")
-                # The installer waits for this H2Link to be gone before it replaces it. If anything (its window,
-                # a hung connection) keeps it from closing within a few seconds, it ends itself.
-                time.sleep(8.0)
-                self.log.flush()
+                time.sleep(0.3)
+                self.log.flush(0.2)
                 os._exit(0)
             except Exception as e:
                 u["status"] = "failed"

@@ -22,8 +22,9 @@ OutputDir=Output
 OutputBaseFilename=H2Link_Setup
 SetupIconFile=installer\h2link.ico
 UninstallDisplayIcon={app}\H2Link.exe
-Compression=lzma2/max
-SolidCompression=yes
+; H2Link.exe is compressed already: a light setting unpacks fastest (quick silent updates)
+Compression=lzma2/fast
+SolidCompression=no
 WizardStyle=modern
 CloseApplications=yes
 

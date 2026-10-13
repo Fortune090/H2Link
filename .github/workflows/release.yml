@@ -46,7 +46,7 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.v.outputs.app }}" installer/H2Link.iss
       - uses: softprops/action-gh-release@v3
         with:
-          name: H2Link ${{ steps.v.outputs.app }}
+          name: H2Link v${{ steps.v.outputs.app }}
           generate_release_notes: true
           files: |
             Output/H2Link_Setup.exe

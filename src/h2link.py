@@ -531,8 +531,11 @@ MAX_SAVE = 32 << 20
 # reads the planned level's tags once, at background I/O priority, so the game later finds them in memory.
 # Only reads; a miss just means a normal-speed load. Tags name the tags they use by path, so the list is
 # found by following those paths from the level's scenario and the globals.
-PREFETCH_MAX_FILES = 12000
-PREFETCH_MAX_BYTES = 3 << 30           # a level's own tags; past this it is reading other levels' tags
+PREFETCH_MAX_FILES = 20000
+# H2EK's whole tags folder is 11.3 GB; the largest level's own folder (Gravemind, 07a_highcharity) is 507 MB, the
+# smallest real one 84 MB. A level's load is its own folder plus the shared tags it uses (objects, sound, effects,
+# bitmaps...), well inside 3 GB once other levels' folders are left out. Windows drops this cache when memory is short.
+PREFETCH_MAX_BYTES = 3 << 30
 PREFETCH_MAX_SECONDS = 240
 _TAG_TEXT = re.compile(rb"[\x20-\x7e]{4,4096}")
 
@@ -551,7 +554,7 @@ def level_scenario_dir(game_dir, level):
 
 
 def prefetch_level(game_dir, level, stop=lambda: False, say=None):
-    """Reads the tag files the level's scenario leads to. Returns (files, bytes, seconds)."""
+    """Reads the tag files the level's scenario leads to. Returns (files, bytes, seconds, files not read)."""
     t0 = time.time()
     if os.name == "nt":
         try:                                    # THREAD_MODE_BACKGROUND_BEGIN: low CPU and I/O priority
@@ -585,14 +588,20 @@ def prefetch_level(game_dir, level, stop=lambda: False, say=None):
         tops = []
     starts = re.compile("|".join(re.escape(t) + r"\\" for t in sorted(tops, key=len, reverse=True)) or "(?!)")
 
+    sdir = level_scenario_dir(game_dir, level)
+    mine = sdir.lower().rstrip("\\/") + os.sep if sdir else ""
+    other_levels = (os.path.join(tags, "scenarios", "solo", "").lower(), os.path.join(tags, "scenarios", "multi", "").lower(),
+                    os.path.join(tags, "scenarios", "ui", "").lower())
+
     def add(paths):
         for path in paths:
             k = path.lower()
+            if k.startswith(other_levels) and not (mine and k.startswith(mine)):
+                continue                          # another level's (or the menus') own tags: not this level's load
             if k not in seen:
                 seen.add(k)
                 todo.append(path)
 
-    sdir = level_scenario_dir(game_dir, level)
     if sdir:
         add(e.path for e in os.scandir(sdir) if e.is_file())
     # not the globals: every map loads them, so they are in memory already, and they lead to every level's art
@@ -623,7 +632,7 @@ def prefetch_level(game_dir, level, stop=lambda: False, say=None):
             ctypes.windll.kernel32.SetThreadPriority(ctypes.windll.kernel32.GetCurrentThread(), 0x00020000)
         except Exception:
             pass
-    return n, size, time.time() - t0
+    return n, size, time.time() - t0, len(todo)
 
 
 # ---- starting the level from the page (needs exe v36 or newer) -------------
@@ -3442,10 +3451,11 @@ class Engine(threading.Thread):
 
         def work():
             try:
-                n, size, secs = prefetch_level(d, level, stop=lambda: self._pf_gen != gen)
+                n, size, secs, left = prefetch_level(d, level, stop=lambda: self._pf_gen != gen)
                 if self._pf_gen == gen:
-                    log.info("Tag prefetch (%s): %s - read %d files, %.0f MB in %.1f s" % (
-                        why, LEVEL_NAME.get(level, level), n, size / 1048576.0, secs))
+                    log.info("Tag prefetch (%s): %s - read %d files, %.0f MB in %.1f s%s" % (
+                        why, LEVEL_NAME.get(level, level), n, size / 1048576.0, secs,
+                        "; stopped at its limit with %d files still to read" % left if left else ""))
             except Exception as e:
                 log.warn("Tag prefetch failed: %s" % e)
         threading.Thread(target=work, daemon=True).start()
@@ -4703,9 +4713,10 @@ def main():
                     help="read the tags a level needs, as H2Link does in the lobby, and say how long it took")
     opts = ap.parse_args()
     if opts.prefetch_test:
-        n, size, secs = prefetch_level(opts.prefetch_test[0], int(opts.prefetch_test[1]))
-        print("%s: %d files, %.0f MB in %.1f s" % (LEVEL_NAME.get(int(opts.prefetch_test[1]), opts.prefetch_test[1]),
-                                                   n, size / 1048576.0, secs))
+        n, size, secs, left = prefetch_level(opts.prefetch_test[0], int(opts.prefetch_test[1]))
+        print("%s: %d files, %.0f MB in %.1f s%s" % (LEVEL_NAME.get(int(opts.prefetch_test[1]), opts.prefetch_test[1]),
+                                                     n, size / 1048576.0, secs,
+                                                     " (stopped at the limit; %d files not read)" % left if left else ""))
         return 0
     if opts.install_game or opts.check_game or opts.restore_game:
         logf = None

@@ -2773,11 +2773,12 @@ class Engine(threading.Thread):
     def game_files_check(self):
         """At start (H2Link.exe): are the game files the ones this H2Link carries? Says so in the activity list
         when not - for example after an update whose game-file step could not run."""
-        if self.game_dir and not os.path.isfile(os.path.join(self.game_dir, "maps", "fonts", "font_table.txt")):
-            # Without it the game falls back to a tiny built-in font: every text field looks small.
-            self.log.warn("The game folder has no maps\\fonts\\font_table.txt, so the game shows all its text in a "
-                          "small fallback font. In Steam: Library > H2EK > Properties > Installed Files > Verify "
-                          "integrity of tool files (or copy the maps\\fonts folder from a complete H2EK).")
+        if self.game_dir and not os.path.isfile(os.path.join(self.game_dir, "h2_fonts", "font_table.txt")):
+            # Without it the game falls back to a tiny built-in font: every text field looks small. Steam's
+            # file check does not bring these files back; the H2EK's own extract script does.
+            self.log.warn("The game folder has no h2_fonts\\font_table.txt, so the game shows all its text in a "
+                          "small fallback font. To repair it, run \"H2EK (Extract).bat\" from the H2EK folder "
+                          "again (or copy the h2_fonts folder from a complete H2EK).")
         if not getattr(sys, "frozen", False) or not self.game_dir:
             return
         try:

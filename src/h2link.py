@@ -531,8 +531,8 @@ MAX_SAVE = 32 << 20
 # reads the planned level's tags once, at background I/O priority, so the game later finds them in memory.
 # Only reads; a miss just means a normal-speed load. Tags name the tags they use by path, so the list is
 # found by following those paths from the level's scenario and the globals.
-PREFETCH_MAX_FILES = 40000
-PREFETCH_MAX_BYTES = 8 << 30
+PREFETCH_MAX_FILES = 12000
+PREFETCH_MAX_BYTES = 3 << 30           # a level's own tags; past this it is reading other levels' tags
 PREFETCH_MAX_SECONDS = 240
 _TAG_TEXT = re.compile(rb"[\x20-\x7e]{4,4096}")
 
@@ -551,7 +551,7 @@ def level_scenario_dir(game_dir, level):
 
 
 def prefetch_level(game_dir, level, stop=lambda: False, say=None):
-    """Reads the tag files the level's scenario (and the globals) lead to. Returns (files, bytes, seconds)."""
+    """Reads the tag files the level's scenario leads to. Returns (files, bytes, seconds)."""
     t0 = time.time()
     if os.name == "nt":
         try:                                    # THREAD_MODE_BACKGROUND_BEGIN: low CPU and I/O priority
@@ -595,7 +595,7 @@ def prefetch_level(game_dir, level, stop=lambda: False, say=None):
     sdir = level_scenario_dir(game_dir, level)
     if sdir:
         add(e.path for e in os.scandir(sdir) if e.is_file())
-    add(stems("globals").get("globals", []))
+    # not the globals: every map loads them, so they are in memory already, and they lead to every level's art
     while todo and not stop():
         if n >= PREFETCH_MAX_FILES or size >= PREFETCH_MAX_BYTES or time.time() - t0 > PREFETCH_MAX_SECONDS:
             break
@@ -659,10 +659,18 @@ SKULLS = (
 )
 SKULL_NAME = {k: n for _, items in SKULLS for k, n in items}
 INIT_ALWAYS = ("error_geometry_hide_all", "console_status_string_render off", "terminal_render off")
+# Room games: fixed packet rate, bandwidth and window for every game channel. Co-op is lockstep - every tick's
+# inputs must reach the host and every tick's update must reach the clients - so its traffic is a small,
+# steady stream (about 100 kbps per client at 60 packets a second). The game fills whatever a channel is
+# allowed (512 kbps gave every packet its full 1.2 KB, about 560 kbps a client), so the cap is kept near the
+# 160-170 kbps it used before throttling: 15 clients then need about 2.5-3 Mbps of the host's upload. The game's own per-connection control
+# treats ordinary internet ping wobble as congestion and cuts that stream (seen live: 60 -> 20 packets a
+# second, 160 -> 48 kbps), which leaves clients' updates queued behind it. These console settings hold it.
+INIT_NET = ("net_rate_server 60", "net_rate_client 60", "net_bandwidth_per_channel 192", "net_window_size 32768")
 INIT_CHEATS_ON = ("cheat_controller on",)
 INIT_CHEATS_OFF = ("cheat_controller off", "debug_menu_enabled off")
 # lines H2Link writes itself; dropped from the player's own lines so they cannot contradict the room's
-INIT_OURS = ("ui_set_automation_", "net_test_", "cheat_controller", "debug_menu_enabled", "debug_ice_cream_flavor_",
+INIT_OURS = ("ui_set_automation_", "net_test_", "net_rate_", "net_window_", "net_bandwidth_", "cheat_controller", "debug_menu_enabled", "debug_ice_cream_flavor_",
              "error_geometry_hide_all", "console_status_string_render", "terminal_render")
 
 
@@ -1808,6 +1816,7 @@ class Engine(threading.Thread):
         self.report = None
         self._exe_cache = {}
         self._pf_level, self._pf_gen, self._pf_tail, self._pf_scan = None, 0, None, 0.0
+        self._pf_inlevel = False            # the game's last loaded map was a campaign level
         self._pf_next = None                # (level, when): the next campaign level, read once this one settles
         self._clear_room()
 
@@ -2110,6 +2119,7 @@ class Engine(threading.Thread):
         if role:
             # Everyone in the room runs with the room host's choices, or the games drift apart.
             lines += INIT_CHEATS_ON if self.plan["cheats"] else INIT_CHEATS_OFF
+            lines += INIT_NET
             lines += ["debug_ice_cream_flavor_status_%s on" % k for k in self.plan["skulls"]]
             lines.append("ui_set_automation_desired_network_session_name %s" % self.session_name())
             if role == "host":
@@ -2763,6 +2773,11 @@ class Engine(threading.Thread):
     def game_files_check(self):
         """At start (H2Link.exe): are the game files the ones this H2Link carries? Says so in the activity list
         when not - for example after an update whose game-file step could not run."""
+        if self.game_dir and not os.path.isfile(os.path.join(self.game_dir, "maps", "fonts", "font_table.txt")):
+            # Without it the game falls back to a tiny built-in font: every text field looks small.
+            self.log.warn("The game folder has no maps\\fonts\\font_table.txt, so the game shows all its text in a "
+                          "small fallback font. In Steam: Library > H2EK > Properties > Installed Files > Verify "
+                          "integrity of tool files (or copy the maps\\fonts folder from a complete H2EK).")
         if not getattr(sys, "frozen", False) or not self.game_dir:
             return
         try:
@@ -3366,11 +3381,16 @@ class Engine(threading.Thread):
         if not self.game_dir:
             return
         slot = next((s for s in self.local_slots if self.games >> s & 1), None)
+        plan_ok = self.plan_known or self.i_host_room()
         if slot is None:
-            self._pf_tail = self._pf_next = None
-            if self.plan_known or self.i_host_room():
+            self._pf_tail, self._pf_next, self._pf_inlevel = None, None, False
+            if plan_ok:
                 self._prefetch_start(self.plan["level"], "the room's level")
             return
+        if not self._pf_inlevel and plan_ok:
+            # a game is open but not in a level yet (main menu, or a game left open from before): read the level
+            # it is about to load - the room's - exactly as in the lobby
+            self._prefetch_start(self.plan["level"], "the room's level")
         if self._pf_next and t >= self._pf_next[1]:      # the level has settled in: read the next one now
             self._prefetch_start(self._pf_next[0], "the next level")
             self._pf_next = None
@@ -3398,7 +3418,14 @@ class Engine(threading.Thread):
         if cut < 0:
             return
         tail[1] += cut + 1
-        for m in re.finditer(rb"lifecycle: MAP-LOADED scenarios\\solo\\(\d\d)([ab])_", chunk[:cut]):
+        for line in chunk[:cut].split(b"\n"):
+            if b"lifecycle: MAP-LOADED " not in line:
+                continue
+            m = re.search(rb"MAP-LOADED scenarios\\solo\\(\d\d)([ab])_", line)
+            self._pf_inlevel = bool(m)                  # the main menu (or anything else) is "not in a level"
+            if not m:
+                self._pf_next = None
+                continue
             level = int(m.group(1)) * 100 + (1 if m.group(2) == b"a" else 5)
             order = [x[0] for x in LEVELS_ALL]
             if level in order and order.index(level) + 1 < len(order):
@@ -3409,6 +3436,8 @@ class Engine(threading.Thread):
             return
         self._pf_level, self._pf_gen = level, self._pf_gen + 1
         gen, d, log = self._pf_gen, self.game_dir, self.log
+
+        log.info("Tag prefetch (%s): reading %s's tags in the background" % (why, LEVEL_NAME.get(level, level)))
 
         def work():
             try:

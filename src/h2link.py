@@ -530,12 +530,33 @@ MAX_SAVE = 32 << 20
 # 21 s cold, 5.5 s with the files already in Windows' cache). While the room sits in the lobby, H2Link
 # reads the planned level's tags once, at background I/O priority, so the game later finds them in memory.
 # Only reads; a miss just means a normal-speed load. Tags name the tags they use by path, so the list is
-# found by following those paths from the level's scenario and the globals.
+# found by following those paths from the level's scenario.
 PREFETCH_MAX_FILES = 20000
-# H2EK's whole tags folder is 11.3 GB; the largest level's own folder (Gravemind, 07a_highcharity) is 507 MB, the
-# smallest real one 84 MB. A level's load is its own folder plus the shared tags it uses (objects, sound, effects,
-# bitmaps...), well inside 3 GB once other levels' folders are left out. Windows drops this cache when memory is short.
-PREFETCH_MAX_BYTES = 3 << 30
+# A level's load is its own folder plus every shared tag it uses (sounds, bitmaps, objects, effects...). Measured:
+# Quarantine Zone 2.6 GB; Gravemind, the largest (its own folder alone 507 MB), passes 3 GB. The limit is 5 GB,
+# or a third of the PC's memory if that is less: Windows keeps what was read in its file cache, and gives it up
+# again whenever a program needs the memory.
+PREFETCH_MAX_BYTES = 5 << 30
+
+
+def prefetch_byte_limit():
+    if os.name == "nt":
+        try:
+            class MEMSTAT(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_uint32), ("dwMemoryLoad", ctypes.c_uint32),
+                            ("ullTotalPhys", ctypes.c_uint64), ("ullAvailPhys", ctypes.c_uint64),
+                            ("ullTotalPageFile", ctypes.c_uint64), ("ullAvailPageFile", ctypes.c_uint64),
+                            ("ullTotalVirtual", ctypes.c_uint64), ("ullAvailVirtual", ctypes.c_uint64),
+                            ("ullAvailExtendedVirtual", ctypes.c_uint64)]
+            m = MEMSTAT()
+            m.dwLength = ctypes.sizeof(MEMSTAT)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+                return min(PREFETCH_MAX_BYTES, m.ullTotalPhys // 3)
+        except Exception:
+            pass
+    return PREFETCH_MAX_BYTES
+
+
 PREFETCH_MAX_SECONDS = 240
 _TAG_TEXT = re.compile(rb"[\x20-\x7e]{4,4096}")
 
@@ -563,6 +584,7 @@ def prefetch_level(game_dir, level, stop=lambda: False, say=None):
             pass
     tags = os.path.join(game_dir, "tags")
     listings = {}
+    max_bytes = prefetch_byte_limit()
 
     def stems(d):                               # d: path below tags, lower case, "\\"-separated
         hit = listings.get(d)
@@ -606,7 +628,7 @@ def prefetch_level(game_dir, level, stop=lambda: False, say=None):
         add(e.path for e in os.scandir(sdir) if e.is_file())
     # not the globals: every map loads them, so they are in memory already, and they lead to every level's art
     while todo and not stop():
-        if n >= PREFETCH_MAX_FILES or size >= PREFETCH_MAX_BYTES or time.time() - t0 > PREFETCH_MAX_SECONDS:
+        if n >= PREFETCH_MAX_FILES or size >= max_bytes or time.time() - t0 > PREFETCH_MAX_SECONDS:
             break
         path = todo.popleft()
         try:

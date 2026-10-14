@@ -29,7 +29,9 @@ WizardStyle=modern
 CloseApplications=yes
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
+; Only offered when there is no H2Link shortcut on the desktop yet, and never in a silent update: re-creating an
+; existing shortcut makes Windows put it at the next free spot, so the one the player placed would move.
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Check: OfferDesktopIcon
 
 [Files]
 Source: "dist\H2Link.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -60,6 +62,11 @@ Type: files; Name: "{app}\game_files.log"
 [Code]
 const
   WV2 = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+
+function OfferDesktopIcon: Boolean;
+begin
+  Result := (not WizardSilent) and not FileExists(ExpandConstant('{autodesktop}\H2Link.lnk'));
+end;
 
 function WebView2At(Root: Integer; Key, Folder: String): Boolean;
 { registered AND its files really there: a registry entry left behind by a removed or damaged runtime does

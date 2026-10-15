@@ -2511,20 +2511,24 @@ class Engine(threading.Thread):
             role = "host" if self.i_host_room() and len(free) == len(self.local_slots) else "join"
             if role == "join" and self.host_lobby and not d.get("now"):
                 d = dict(d, now=True, go=True)               # the host waits in its lobby: join it now
-            if role == "join" and self.host_live and self._first_window and not d.get("pf_skip"):
+            # (not when starting together with the host - its launch, or its lobby: everyone loads the level
+            #  side by side and the level only starts once all are in)
+            if (role == "join" and self.host_live and self._first_window and not d.get("pf_skip")
+                    and not d.get("go") and not self.host_lobby):
                 # Joining a level that is being played: read the level's tags first, so this PC's game loads it
                 # from memory like the host's did (a slow cold load during the join has led to desyncs).
                 level = self.plan["level"]
                 if self.pf_wait is not None:
-                    self.pf_wait = None
-                    self.log.warn("Starting now although %s's tags are not read yet" % LEVEL_NAME.get(level, level))
-                elif self._pf_done != level:
+                    # no skipping this one: a join from a cold disk is what desynced
+                    self.log.info("Still reading %s's tags - the game starts by itself when that is done"
+                                  % LEVEL_NAME.get(level, level))
+                    return
+                if self._pf_done != level:
                     self._pf_level = None if self._pf_level == level and self._pf_done != level else self._pf_level
                     self._prefetch_start(level, "joining a game in progress")
                     self.pf_wait = dict(d)
                     self.log.info("Reading %s's tags before joining the game in progress, so it loads as fast as "
-                                  "the host's. Your game starts by itself then; press the button again to start "
-                                  "it now anyway." % LEVEL_NAME.get(level, level))
+                                  "the host's. Your game starts by itself then." % LEVEL_NAME.get(level, level))
                     return
             if role == "join" and self.host_live is False and not d.get("now"):
                 if not self.launch_wait:
@@ -4557,8 +4561,8 @@ function panel(){
         `<dt>Skulls</dt><dd class="wide">${esc(P.skulls.length?P.skulls.map(k=>SK[k]||k).join(', '):'None')}</dd></dl>`}
     $('t-game').hidden=!$('t-game').textContent;
     const early=!S.i_host&&run===0&&!S.host_started;   // a client before the room host has launched
-    $('b-launch').disabled=run>=n||waiting||early;
-    $('b-launch').textContent=run>0&&run<n?'Start another game window':(S.i_host&&auto?'Launch':S.launch_wait||S.pf_wait?'Start now anyway':'Start the game');
+    $('b-launch').disabled=run>=n||waiting||early||!!S.pf_wait;
+    $('b-launch').textContent=run>0&&run<n?'Start another game window':(S.i_host&&auto?'Launch':S.pf_wait?'Reading the level\'s tags…':S.launch_wait?'Start now anyway':'Start the game');
     $('b-leave').textContent=S.mode==='host'?'Close room':'Leave room';
     $('warns').innerHTML=S.warnings.map(w=>`<div class="warn">${esc(w)}</div>`).join('');
     const f=[];

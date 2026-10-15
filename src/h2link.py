@@ -53,7 +53,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.1.8"
+VERSION = "1.2.0"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -769,6 +769,7 @@ T_HELLO, T_CHALLENGE, T_AUTH, T_WELCOME, T_REJECT, T_LIST, T_ROOMS = 1, 2, 3, 4,
 T_PING, T_PONG, T_BYE, T_DATA, T_REL, T_RACK = 0x10, 0x11, 0x12, 0x20, 0x30, 0x31
 M_ROSTER, M_PAGE_G, M_PAGE_P, M_EVENT, M_JSYNC, M_JSYNC_PUB, M_JSYNC_LOADED, M_ROOM, M_LANE, M_LIVE, M_ROLE, M_CHAT, M_GO = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
 M_AUTO = 14
+M_VER = 16                              # this PC's H2Link version and game exe build, for the version check (1.2.0+)
 M_CHATLOG = 15                          # the room's chat so far, from the room host to a PC that joins (1.0.14+)                             # "my game starts when the room host launches": 1 or 0 (1.0.8+)
 HDR = struct.Struct("<BBB4s")
 REL_HDR = struct.Struct("<BBB4sIIIB")
@@ -1340,6 +1341,7 @@ class Peer:
         self.rx = RelRx()
         self.fresh = True               # still owed a state snapshot
         self.since = 0                  # order of entering the room
+        self.app_ver, self.exe_ver = "", 0      # its H2Link version and game exe build (M_VER), "" / 0 = not told
         self.rx_pk = self.tx_pk = self.rx_by = self.tx_by = 0
         # kept by the room host only
         self.uuid = None
@@ -1392,6 +1394,7 @@ class Mirror:
             log = [dict(n=n, t=x, w=int(w)) for _, w, n, x, _ in list(eng.chat)[-50:]]
             eng.send_msg(peer, bytes([M_CHATLOG]) + json.dumps(log).encode())
         eng.send_msg(peer, bytes([M_AUTO, 1 if eng.cfg.get("auto_start", True) else 0]))
+        eng.send_msg(peer, bytes([M_VER]) + json.dumps(dict(app=VERSION, exe=eng._local_exe_version())).encode())
 
     def _local_bits(self):
         return int.from_bytes(self.page.read(P_OFF, P_LEN), "little") & ~self.p_union
@@ -3289,6 +3292,12 @@ class Engine(threading.Thread):
                                               str(e["n"])[:24], text, False))
                 except (ValueError, KeyError, TypeError):
                     pass
+        elif kind == M_VER:
+            try:
+                v = json.loads(msg[1:].decode())
+                p.app_ver, p.exe_ver = str(v.get("app", ""))[:16], int(v.get("exe", 0) or 0)
+            except (ValueError, TypeError, AttributeError):
+                pass
         elif kind == M_ROLE and len(msg) >= 2:
             p.hosting = bool(msg[1])
         elif kind == M_AUTO and len(msg) >= 2:
@@ -3505,6 +3514,35 @@ class Engine(threading.Thread):
                 log.warn("Tag prefetch failed: %s" % e)
         threading.Thread(target=work, daemon=True).start()
 
+    def _version_check(self, t):
+        """Warn in the activity log, once each, about any player whose H2Link or game exe differs from the room
+        host's (normally impossible: H2Link updates itself; it can happen right after a release)."""
+        if t < getattr(self, "_ver_next", 0.0):
+            return
+        self._ver_next = t + 3.0
+        warned = self.__dict__.setdefault("_ver_warned", set())
+        mine = (VERSION, self._local_exe_version())
+
+        def told(q):                                # an H2Link older than 1.2.0 never says: after 15 s, call it that
+            if q.app_ver:
+                return (q.app_ver, q.exe_ver)
+            return ("older than 1.2.0", 0) if now() - q.born > 15.0 else None
+        host = self.room_host()
+        hv = mine if host is None else told(host)
+        if not hv:
+            return                                  # the host's versions are not known yet
+        hname = "you" if host is None else host.name
+        people = [(self.cfg.get("name", "?") + " (you)", mine)] if host is not None else []
+        people += [(q.name, told(q)) for q in self.peers.values()
+                   if q is not host and self.is_player(q) and told(q)]
+        for name, v in people:
+            if v == hv or (name, v, hv) in warned:
+                continue
+            warned.add((name, v, hv))
+            desc = lambda x: "H2Link %s" % x[0] + (" with game exe v%d" % x[1] if x[1] else "")
+            self.log.warn("Version mismatch: %s has %s, but the room host (%s) has %s. Players should be on "
+                          "the same versions." % (name, desc(v), hname, desc(hv)))
+
     def _slow(self, t):
         if t >= self._upd_next and not self._upd_busy:
             self._upd_next = t + UPDATE_EVERY
@@ -3515,6 +3553,7 @@ class Engine(threading.Thread):
         if not self.in_room:
             return
         self._prefetch_check(t)
+        self._version_check(t)
         h = self.hosting()
         if h != self.hosting_sent:
             self.hosting_sent = h
@@ -4292,6 +4331,7 @@ details{margin:2px 0 14px} summary{cursor:pointer;color:var(--hi);font-size:13px
     <h3 class="sub">Player settings</h3>
     <input type="checkbox" id="f-skip" checked hidden>
     <label class="check" id="l-autostart" style="margin:0 0 12px" hidden><input type="checkbox" id="f-autostart">Start my game when the room host launches</label>
+    <label class="check" id="l-snap" style="margin:0 0 12px" title="Without title bars. 1 window: full screen. 2: left and right. 3: one on top, two below (on 21:9 and wider: one left, two right). 4: the four corners."><input type="checkbox" id="f-snap">Auto full/split screen</label>
     <div id="profile-box">
       <label>Halo 2 profile to sign in with<input id="f-profile" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Guest profile"></label>
       <p class="hint" id="t-profile"></p>
@@ -4299,7 +4339,6 @@ details{margin:2px 0 14px} summary{cursor:pointer;color:var(--hi);font-size:13px
     </div>
     <div class="row" id="row-want" style="align-items:flex-end">
       <label>Players on this PC<select id="f-want"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
-      <label class="check beside" title="Without title bars. 1 window: full screen. 2: left and right. 3: one on top, two below (on 21:9 and wider: one left, two right). 4: the four corners."><input type="checkbox" id="f-snap"><span>Auto full/split screen</span></label>
     </div>
     </div></div>
     <details style="margin-top:14px"><summary>Other H2Link settings</summary>

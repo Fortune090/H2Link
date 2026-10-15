@@ -3,7 +3,7 @@
   "file": "h2link_30tick.exe",
   "from": "halo2_tag_test.exe",
   "patch": "h2link_30tick.h2p",
-  "version": 139
+  "version": 147
  },
  {
   "file": "h2link_60tick.exe",

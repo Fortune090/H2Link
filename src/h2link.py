@@ -39,6 +39,7 @@ import struct
 import subprocess
 import sys
 import shutil
+import stat
 import tempfile
 import threading
 import time
@@ -203,7 +204,9 @@ def window_name(base, k):
 
 # ---- game files: H2Link's changes to H2EK files, applied to the player's own copies -------------------
 # patches/patches.json lists {"file": made or changed (relative to the game folder), "from": the original it is
-# made from, "patch": file in patches/}. A file changed in place is backed up first (h2link_backup in the game
+# made from, "patch": file in patches/; optional "skip_if_changed": true - when the
+# file is there but is not the original (already updated), it is skipped and logged instead of stopping the
+# install - and "readonly": true - the made file gets the read-only flag}. A file changed in place is backed up first (h2link_backup in the game
 # folder) and later patches are made from that backup, so updates and uninstalling always start from the original.
 import zlib
 
@@ -351,6 +354,9 @@ def _game_plan(game_dir, say):
                 it["state"], it["orig"] = "make", cand
                 break
         else:
+            if it.get("skip_if_changed") and os.path.isfile(os.path.join(game_dir, it["from"])):
+                it["state"] = "skip"              # a settings file already changed (e.g. by the player): leave it
+                continue
             it["state"] = "missing"
             src = os.path.join(game_dir, it["from"])
             problems.append("%s - %s" % (os.path.normpath(src),
@@ -380,7 +386,12 @@ def install_game(game_dir, say=print, check_only=False):
     bad = 0
     for it in items:
         if it["state"] == "up to date":
+            if it.get("readonly"):
+                _set_readonly(os.path.join(game_dir, it["file"]), True)
             say("  up to date      %s" % it["file"])
+            continue
+        if it["state"] == "skip":
+            say("  skipped         %s - already changed from the H2EK original, left as it is" % it["file"])
             continue
         dst = os.path.join(game_dir, it["file"])
         try:
@@ -395,12 +406,23 @@ def install_game(game_dir, say=print, check_only=False):
             os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
             with open(dst + ".h2link_new", "wb") as f:
                 f.write(out)
+            _set_readonly(dst, False)            # a read-only file cannot be replaced on Windows
             os.replace(dst + ".h2link_new", dst)
+            if it.get("readonly"):                 # e.g. Durazno.ini, so nothing rewrites it with the old values
+                _set_readonly(dst, True)
             say("  installed       %s" % it["file"])
         except (OSError, ValueError) as e:
             say("  NOT CHANGED     %s: %s" % (it["file"], e))
             bad += 1
     return 1 if bad else 0
+
+def _set_readonly(path, on):
+    """Read-only flag of a game file (Windows' attribute; plain write permission elsewhere)."""
+    try:
+        if os.path.isfile(path):
+            os.chmod(path, stat.S_IREAD if on else stat.S_IREAD | stat.S_IWRITE)
+    except OSError:
+        pass
 
 def restore_game(game_dir, say=print):
     """Puts the H2EK originals back and removes the files H2Link made."""
@@ -423,6 +445,7 @@ def restore_game(game_dir, say=print):
             rel = os.path.relpath(b, bdir)
             try:
                 os.makedirs(os.path.dirname(os.path.join(game_dir, rel)) or ".", exist_ok=True)
+                _set_readonly(os.path.join(game_dir, rel), False)
                 shutil.copyfile(b, os.path.join(game_dir, rel))
                 say("  restored        %s" % rel)
             except OSError as e:
@@ -2820,7 +2843,7 @@ class Engine(threading.Thread):
             self.log.warn("The game files could not be updated: %s is not the H2EK's original. In Steam: Library > "
                           "H2EK > Properties > Installed Files > Verify integrity of tool files, then install H2Link "
                           "again." % ", ".join(os.path.basename(p.split(" - ")[0]) for p in problems))
-        elif any(it["state"] != "up to date" for it in items):
+        elif any(it["state"] not in ("up to date", "skip") for it in items):
             rc = install_game(self.game_dir, say=lambda *_: None)
             self.log.info("Game files updated for this H2Link" if rc == 0 else "The game files could not be updated")
 

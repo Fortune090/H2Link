@@ -75,5 +75,12 @@
   "file": "debug_menu_init.txt",
   "from": "debug_menu_init.txt",
   "patch": "debug_menu_init.txt.h2p"
+ },
+ {
+  "file": "Durazno.ini",
+  "from": "Durazno.ini",
+  "patch": "Durazno.ini.h2p",
+  "readonly": true,
+  "skip_if_changed": true
  }
 ]

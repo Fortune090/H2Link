@@ -53,7 +53,7 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "H2Link"
-VERSION = "1.2.0"
+VERSION = "1.2.0a"
 # Where new releases are published (GitHub "owner/repository"). The release build fills this in; a
 # setting "update_repo" in h2link.json overrides it. Each release carries manifest.json:
 #   {"h2link": "1.0.20", "exe": 78, "installer": "H2Link_Setup.exe"}
@@ -1873,6 +1873,8 @@ class Engine(threading.Thread):
         self.report = None
         self._exe_cache = {}
         self._pf_level, self._pf_gen, self._pf_tail, self._pf_scan = None, 0, None, 0.0
+        self._pf_done = None                # level whose prefetch last ran to the end
+        self.pf_wait = None                 # a join-in-progress launch held back until the level's tags are read
         self._pf_inlevel = False            # the game's last loaded map was a campaign level
         self._pf_next = None                # (level, when): the next campaign level, read once this one settles
         self._clear_room()
@@ -2509,6 +2511,21 @@ class Engine(threading.Thread):
             role = "host" if self.i_host_room() and len(free) == len(self.local_slots) else "join"
             if role == "join" and self.host_lobby and not d.get("now"):
                 d = dict(d, now=True, go=True)               # the host waits in its lobby: join it now
+            if role == "join" and self.host_live and self._first_window and not d.get("pf_skip"):
+                # Joining a level that is being played: read the level's tags first, so this PC's game loads it
+                # from memory like the host's did (a slow cold load during the join has led to desyncs).
+                level = self.plan["level"]
+                if self.pf_wait is not None:
+                    self.pf_wait = None
+                    self.log.warn("Starting now although %s's tags are not read yet" % LEVEL_NAME.get(level, level))
+                elif self._pf_done != level:
+                    self._pf_level = None if self._pf_level == level and self._pf_done != level else self._pf_level
+                    self._prefetch_start(level, "joining a game in progress")
+                    self.pf_wait = dict(d)
+                    self.log.info("Reading %s's tags before joining the game in progress, so it loads as fast as "
+                                  "the host's. Your game starts by itself then; press the button again to start "
+                                  "it now anyway." % LEVEL_NAME.get(level, level))
+                    return
             if role == "join" and self.host_live is False and not d.get("now"):
                 if not self.launch_wait:
                     self.launch_wait = True
@@ -3263,7 +3280,7 @@ class Engine(threading.Thread):
             if rh is not None and rh.id == p.id and not self.i_host_room():
                 if not self.cfg.get("auto_start", True):
                     self.log.info("%s launched the game - press Start the game to join" % p.name)
-                elif self.games or self.launch_wait:
+                elif self.games or self.launch_wait or self.pf_wait is not None:
                     pass                                    # a game is running or about to start already
                 else:
                     n = len(self.local_slots)
@@ -3507,11 +3524,14 @@ class Engine(threading.Thread):
             try:
                 n, size, secs, left = prefetch_level(d, level, stop=lambda: self._pf_gen != gen)
                 if self._pf_gen == gen:
+                    self._pf_done = level
                     log.info("Tag prefetch (%s): %s - read %d files, %.0f MB in %.1f s%s" % (
                         why, LEVEL_NAME.get(level, level), n, size / 1048576.0, secs,
                         "; stopped at its limit with %d files still to read" % left if left else ""))
             except Exception as e:
                 log.warn("Tag prefetch failed: %s" % e)
+                if self._pf_gen == gen:
+                    self._pf_done = level               # nothing more to wait for
         threading.Thread(target=work, daemon=True).start()
 
     def _version_check(self, t):
@@ -3588,6 +3608,13 @@ class Engine(threading.Thread):
                 self.go_more = 0
         if self.host_live:
             self.host_lobby = False                         # the host's level is up: later games join in progress
+        if self.pf_wait is not None:
+            level = self.plan["level"]
+            if self._pf_done == level or not self.in_room or self.games:
+                held, self.pf_wait = self.pf_wait, None
+                if self.in_room and not self.games:
+                    self.log.info("%s's tags are read - starting the game" % LEVEL_NAME.get(level, level))
+                    self._cmd_launch(dict(held, pf_skip=True))
         if self.launch_wait and self.host_live is not False:
             self.launch_wait = False
             self.log.info("The host's level is loaded - starting the game" if self.host_live
@@ -3720,7 +3747,7 @@ class Engine(threading.Thread):
         self.snap = dict(
             share=share, router=router, report=self.report, on_server=self.server_room, relay_only=self.relay_only,
             i_host=self.i_host_room(), host_name=self.room_host().name if self.room_host() else c.get("name", ""),
-            launch_wait=self.launch_wait, host_live=self.host_live,
+            launch_wait=self.launch_wait, pf_wait=self.pf_wait is not None, host_live=self.host_live,
             host_started=bool(self.host_lobby or self.host_live),
             update=self.update,
             crash=(self.cfg.get("crash_report") if self.cfg.get("crash_report") and
@@ -4516,6 +4543,7 @@ function panel(){
         'Your game is running. Players who start now join in progress. Close the game to change these.'):
       run>0?'The game is running in your slot.':
       waiting?'Waiting for the room host\'s settings.':
+      S.pf_wait?'Reading the level\'s tags before joining the game in progress. Your game starts by itself then.':
       S.launch_wait?'Waiting for '+S.host_name+'\'s level to finish loading. Your game starts by itself then.':
 '';
     $('roominfo').hidden=S.i_host||waiting;
@@ -4530,7 +4558,7 @@ function panel(){
     $('t-game').hidden=!$('t-game').textContent;
     const early=!S.i_host&&run===0&&!S.host_started;   // a client before the room host has launched
     $('b-launch').disabled=run>=n||waiting||early;
-    $('b-launch').textContent=run>0&&run<n?'Start another game window':(S.i_host&&auto?'Launch':S.launch_wait?'Start now anyway':'Start the game');
+    $('b-launch').textContent=run>0&&run<n?'Start another game window':(S.i_host&&auto?'Launch':S.launch_wait||S.pf_wait?'Start now anyway':'Start the game');
     $('b-leave').textContent=S.mode==='host'?'Close room':'Leave room';
     $('warns').innerHTML=S.warnings.map(w=>`<div class="warn">${esc(w)}</div>`).join('');
     const f=[];

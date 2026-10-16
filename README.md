@@ -23,5 +23,3 @@ To use cheats in game (if enabled by host), press Pause/Break on the keyboard or
 | `tools/make_patches.py` | makes `patches/` from an untouched H2EK folder and the patched files |
 | `installer/` | Inno Setup script, icon, server key, local build script |
 | `.github/workflows/release.yml` | builds and publishes a release when a version tag is pushed |
-
-See [RELEASING.md](RELEASING.md).
